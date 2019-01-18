@@ -1,3 +1,7 @@
+# 1.0.0 (2019-01-18)
+
+
+
 # [1.0.0-beta.22](https://github.com/avohq/cli/compare/1.0.0-beta.21...1.0.0-beta.22) (2019-01-15)
 
 
