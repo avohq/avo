@@ -5,10 +5,10 @@
   "author": "Avo (https://www.avo.sh)",
   "repository": {
     "type": "git",
-    "url": "https://github.com/avohq/cli.git"
+    "url": "https://github.com/avohq/avo.git"
   },
   "license": "MIT",
-  "homepage": "https://github.com/avohq/cli",
+  "homepage": "https://github.com/avohq/avo",
   "bin": {
     "avo": "cli.js"
   },
