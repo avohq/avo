@@ -16,6 +16,7 @@ const request = require('request');
 const semver = require('semver');
 const updateNotifier = require('update-notifier');
 const url = require('url');
+const util = require('util');
 const uuidv4 = require('uuid/v4');
 const writeFile = require('write');
 const writeJsonFile = require('write-json-file');
@@ -346,7 +347,7 @@ function codegen(json, result) {
 }
 
 function selectSource(json) {
-  let cancelWait = wait('Fetching sources');
+  wait('Fetching sources');
   return api
     .request('POST', '/c/v1/sources', {
       origin: api.apiOrigin,
@@ -437,7 +438,7 @@ function pull(argv, json) {
       ]
     : json.sources;
   let sourceNames = _.map(sources, source => source.name);
-  let cancelWait = wait(`Pulling ${sourceNames.join(', ')}`);
+  wait(`Pulling ${sourceNames.join(', ')}`);
   return api
     .request('POST', '/c/v1/pull', {
       origin: api.apiOrigin,
@@ -537,7 +538,7 @@ require('yargs')
           );
         });
       };
-      let cancelWait = wait('Fetching workspaces');
+      wait('Fetching workspaces');
       requireAuth(argv, () => {
         return api
           .request('GET', '/c/v1/workspaces', {
@@ -586,7 +587,7 @@ require('yargs')
     handler: argv => {
       let command = json => {
         requireAuth(argv, () => {
-          let cancelWait = wait('Fetching branches');
+          wait('Fetching branches');
           return api
             .request('POST', '/c/v1/branches', {
               origin: api.apiOrigin,
@@ -639,7 +640,7 @@ require('yargs')
       let command = json => {
         requireAuth(argv, () => {
           // print(info(`Your branch is up to date`));
-          let cancelWait = wait('Fetching branches');
+          wait('Fetching branches');
           return api
             .request('POST', '/c/v1/branches', {
               origin: api.apiOrigin,
@@ -1189,7 +1190,15 @@ function print(message) {
   process.stderr.write(`${message}\n`);
 }
 
+let _cancel = null;
+function cancelWait() {
+  if (_cancel !== null) {
+    _cancel();
+    _cancel = null;
+  }
+}
 function wait(message, timeOut) {
+  cancelWait();
   timeOut = timeOut || 300;
   let running = false;
   let spinner;
@@ -1215,7 +1224,7 @@ function wait(message, timeOut) {
   };
 
   process.on('nowExit', cancel);
-  return cancel;
+  cancelWait = cancel;
 }
 
 /////////////////////////////////////////////////////////////////////////
@@ -1303,7 +1312,6 @@ function _loginWithLocalhost(port) {
   return new Promise(function(resolve, reject) {
     var callbackUrl = _getCallbackUrl(port);
     var authUrl = _getLoginUrl(callbackUrl);
-    let cancelWait;
 
     var server = http.createServer(function(req, res) {
       var tokens;
@@ -1342,7 +1350,7 @@ function _loginWithLocalhost(port) {
 
     server.listen(port, function() {
       print(info(`Visit this URL on any device to login: ${link(authUrl)}`));
-      cancelWait = wait(`Waiting for authentication...`);
+      wait(`Waiting for authentication...`);
 
       opn(authUrl, {wait: false});
     });
@@ -1452,11 +1460,9 @@ function responseToError(response, body) {
     };
   }
 
-  var message =
-    'HTTP Error: ' +
-    response.statusCode +
-    ', ' +
-    (body.error.message || body.error);
+  var message = error(
+    `HTTP Error: ${response.statusCode}, ${body.error.message || body.error}`
+  );
 
   var exitCode;
   if (response.statusCode >= 500) {
@@ -1503,3 +1509,17 @@ function requireAuth(argv, cb) {
   api.setRefreshToken(tokens.refreshToken);
   return cb();
 }
+
+//////////////////// ////////
+// catch unhandled promises
+
+process.on('unhandledRejection', err => {
+  cancelWait();
+
+  if (!(err instanceof Error) && !(err instanceof AvoError)) {
+    err = new AvoError(`Promise rejected with value: ${util.inspect(err)}`);
+  }
+  print(err.message);
+
+  process.exit(1);
+});
