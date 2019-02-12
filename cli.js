@@ -24,7 +24,7 @@ const writeJsonFile = require('write-json-file');
 const Configstore = require('configstore');
 const pkg = require('./package.json');
 
-const analytics = require('./analytics.js');
+const analytics = require('./Avo.js');
 
 const customAnalyticsDestination = {
   make: function make(production) {
