@@ -43,8 +43,8 @@ const customAnalyticsDestination = {
   }
 };
 // setup Avo analytics
-analytics.setup_(
-  {validateProperties: false, useProductionKey: true},
+analytics.initAvo(
+  {env: 'prod'},
   {client: analytics.Client.CLI, version: pkg.version},
   customAnalyticsDestination
 );
