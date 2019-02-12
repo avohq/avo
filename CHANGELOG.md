@@ -1,3 +1,7 @@
+## [1.1.1](https://github.com/avohq/avo/compare/1.1.0...1.1.1) (2019-02-12)
+
+
+
 # [1.1.0](https://github.com/avohq/avo/compare/1.0.1...1.1.0) (2019-02-12)
 
 
