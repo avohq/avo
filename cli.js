@@ -705,59 +705,7 @@ require('yargs')
     }
   })
   .command({
-    command: 'branch',
-    desc: 'List branches',
-    handler: argv => {
-      let command = json => {
-        requireAuth(argv, () => {
-          wait('Fetching branches');
-          return api
-            .request('POST', '/c/v1/branches', {
-              origin: api.apiOrigin,
-              auth: true,
-              data: {
-                schemaId: json.schema.id
-              }
-            })
-            .then(res => {
-              cancelWait();
-              let result = res.body;
-              let branches = _.sortBy(result.branches, 'name');
-              branches.forEach(branch => {
-                if (branch.id === json.branch.id) {
-                  print(selected(branch.name));
-                } else {
-                  print(item(branch.name));
-                }
-              });
-            });
-        });
-      };
-      loadAvoJson()
-        .then(json => {
-          analytics.cliInvoked({
-            schemaId: json.schema.id,
-            userId_: installIdOrUserId(),
-            cliAction: analytics.CliAction.BRANCH,
-            cliInvokedByCi: invokedByCi()
-          });
-          command(json);
-        })
-        .catch(err => {
-          if (err instanceof AvoError) {
-            print(err.message);
-          }
-          analytics.cliInvoked({
-            schemaId: 'N/A',
-            userId_: installIdOrUserId(),
-            cliAction: analytics.CliAction.BRANCH,
-            cliInvokedByCi: invokedByCi()
-          });
-        });
-    }
-  })
-  .command({
-    command: 'checkout [branch]',
+    command: ['checkout [branch]', 'branch'],
     desc: 'Switch branches',
     handler: argv => {
       let command = json => {
@@ -871,9 +819,6 @@ require('yargs')
                     return {name: source.name, children: [{name: source.path}]};
                   })
                 );
-                // _.each(json.sources, source => {
-                //   print(selected(`${source.name}: ${file(source.path)}`));
-                // });
               });
             };
             loadAvoJson()
@@ -1197,20 +1142,8 @@ require('yargs')
 /////////////////////////////////////////////////////////////////////////
 // LOGGING
 
-function error(message) {
-  return `${red('> Error!')} ${message}`;
-}
-
 function cmd(command) {
   return `${gray('`')}${cyan(command)}${gray('`')}`;
-}
-
-function selected(message) {
-  return `${gray('*')} ${message}`;
-}
-
-function item(message) {
-  return `  ${message}`;
 }
 
 function link(url) {
@@ -1498,9 +1431,8 @@ function responseToError(response, body) {
     };
   }
 
-  var message = error(
-    `HTTP Error: ${response.statusCode}, ${body.error.message || body.error}`
-  );
+  var message = `HTTP Error: ${response.statusCode}, ${body.error.message ||
+    body.error}`;
 
   var exitCode;
   if (response.statusCode >= 500) {
