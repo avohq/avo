@@ -61,6 +61,9 @@ if (!conf.has('avo_install_id')) {
 
 const FIFTEEN_MINUTES_IN_MS = 15 * 60 * 1000;
 
+// to cancel spinners globally
+let _cancel = null;
+
 var nonce = _.random(1, 2 << 29).toString();
 
 portfinder.basePort = 9005;
@@ -299,6 +302,102 @@ function loadAvoJson() {
     });
 }
 
+function loadAvoJsonOrInit() {
+  return loadJsonFile('avo.json')
+    .then(json => {
+      if (avoNeedsUpdate(json)) {
+        throw new AvoError(error(`Your avo CLI is outdated, please update`));
+      }
+
+      if (isLegacyAvoJson(json)) {
+        return init();
+      }
+
+      // augment the latest major version into avo.json
+      json.avo = Object.assign({}, json.avo || {}, {
+        version: semver.major(pkg.version)
+      });
+
+      return json;
+    })
+    .catch(err => {
+      if (err.code === 'ENOENT') {
+        return init();
+      } else {
+        throw err;
+      }
+    });
+}
+
+function init() {
+  let writeAvoJson = schema => {
+    let json = {
+      avo: {
+        version: semver.major(pkg.version)
+      },
+      schema: {
+        id: schema.id,
+        name: schema.name
+      },
+      branch: {
+        id: 'master',
+        name: 'master'
+      }
+    };
+    return writeJsonFile('avo.json', json, {indent: 2}).then(() => {
+      // print(
+      //   success(
+      //     `Successfully initialized Avo workspace ${cyan(
+      //       schema.name
+      //     )} and created ${file('avo.json')}. Run ${cmd(
+      //       'avo pull'
+      //     )} to generate a tracking library`
+      //   )
+      // );
+      return json;
+    });
+  };
+  wait('Fetching workspaces');
+  return api
+    .request('GET', '/c/v1/workspaces', {
+      origin: api.apiOrigin,
+      auth: true
+    })
+    .then(res => {
+      cancelWait();
+      let result = res.body;
+      let schemas = _.orderBy(result.workspaces, 'lastUsedAt', 'desc');
+      if (schemas.length > 1) {
+        let choices = schemas.map(schema => {
+          return {value: schema, name: schema.name};
+        });
+        return inquirer
+          .prompt([
+            {
+              type: 'list',
+              name: 'schema',
+              message: 'Select a workspace to initialize',
+              choices: choices
+            }
+          ])
+          .then(answer => {
+            return writeAvoJson(answer.schema);
+          });
+      } else if (schemas.length === 0) {
+        throw new AvoError(
+          warn(
+            `No workspaces to initialize. Go to ${link(
+              'wwww.avo.app'
+            )} to create one`
+          )
+        );
+      } else {
+        let schema = schemas[0];
+        return writeAvoJson(schema);
+      }
+    });
+}
+
 function codegen(json, result) {
   let schema = result.schema;
   let targets = result.sources;
@@ -332,12 +431,19 @@ function codegen(json, result) {
   });
 
   Promise.all(_.concat([avoJsonTask], sourceTasks)).then(() => {
+    print(
+      success(
+        `Tracking ${
+          targets.length > 1 ? 'libraries' : 'library'
+        } successfully updated`
+      )
+    );
     targets.forEach(target => {
       let source = _.find(newJson.sources, source => source.id === target.id);
       if (target.code.length === 1) {
-        print(ok(`Updated source ${source.name}: ${file(source.path)}`));
+        print(ok(`${source.name}: ${file(source.path)}`));
       } else if (target.code.length > 1) {
-        print(ok(`Updated source ${source.name}:`));
+        print(ok(`${source.name}:`));
         target.code.forEach(code => {
           print(selected(`${file(code.path)}`));
         });
@@ -412,16 +518,7 @@ function selectSource(json) {
           let sources = _.concat(json.sources || [], [source]);
           let newJson = Object.assign({}, json, {sources: sources});
           return writeJsonFile('avo.json', newJson, {indent: 2}).then(() => {
-            print(
-              ok(
-                `Added source ${source.name} to the project. Run ${cmd(
-                  'avo pull ' +
-                    (source.name.indexOf(' ') > -1
-                      ? '"' + source.name + '"'
-                      : source.name)
-                )} to generate tracking library`
-              )
-            );
+            print(ok(`Added source ${source.name} to the project`));
           });
         });
     });
@@ -509,75 +606,8 @@ require('yargs')
           return;
         }
       }
-      let writeAvoJson = schema => {
-        return writeJsonFile(
-          'avo.json',
-          {
-            avo: {
-              version: semver.major(pkg.version)
-            },
-            schema: {
-              id: schema.id,
-              name: schema.name
-            },
-            branch: {
-              id: 'master',
-              name: 'master'
-            }
-          },
-          {indent: 2}
-        ).then(() => {
-          print(
-            success(
-              `Successfully initialized Avo workspace ${cyan(
-                schema.name
-              )} and created ${file('avo.json')}. Run ${cmd(
-                'avo pull'
-              )} to generate a tracking library`
-            )
-          );
-        });
-      };
-      wait('Fetching workspaces');
       requireAuth(argv, () => {
-        return api
-          .request('GET', '/c/v1/workspaces', {
-            origin: api.apiOrigin,
-            auth: true
-          })
-          .then(res => {
-            cancelWait();
-            let result = res.body;
-            let schemas = _.orderBy(result.workspaces, 'lastUsedAt', 'desc');
-            if (schemas.length > 1) {
-              let choices = schemas.map(schema => {
-                return {value: schema, name: schema.name};
-              });
-              inquirer
-                .prompt([
-                  {
-                    type: 'list',
-                    name: 'schema',
-                    message: 'Select a workspace to initialize',
-                    choices: choices
-                  }
-                ])
-                .then(answer => {
-                  return writeAvoJson(answer.schema);
-                });
-            } else if (schemas.length === 0) {
-              print(
-                warn(
-                  `No workspaces to initialize. Go to ${link(
-                    'wwww.avo.app'
-                  )} to create one`
-                )
-              );
-            } else {
-              let schema = schemas[0];
-              writeAvoJson(schema);
-            }
-          });
+        init();
       });
     }
   })
@@ -750,8 +780,15 @@ require('yargs')
     command: 'pull [source]',
     desc: 'Download code from Avo workspace',
     handler: argv => {
-      let command = json => {
-        requireAuth(argv, () => {
+      requireAuth(argv, () => {
+        loadAvoJsonOrInit().then(json => {
+          analytics.cliInvoked({
+            schemaId: json.schema.id,
+            userId_: installIdOrUserId(),
+            cliAction: analytics.CliAction.PULL,
+            cliInvokedByCi: invokedByCi()
+          });
+
           if (!json.sources) {
             print(info(`No sources configured.`));
             selectSource(json).then(() => {
@@ -763,28 +800,7 @@ require('yargs')
             pull(argv, json);
           }
         });
-      };
-      loadAvoJson()
-        .then(json => {
-          analytics.cliInvoked({
-            schemaId: json.schema.id,
-            userId_: installIdOrUserId(),
-            cliAction: analytics.CliAction.PULL,
-            cliInvokedByCi: invokedByCi()
-          });
-          command(json);
-        })
-        .catch(err => {
-          if (err instanceof AvoError) {
-            print(err.message);
-          }
-          analytics.cliInvoked({
-            schemaId: 'N/A',
-            userId_: installIdOrUserId(),
-            cliAction: analytics.CliAction.PULL,
-            cliInvokedByCi: invokedByCi()
-          });
-        });
+      });
     }
   })
   .command({
@@ -1190,7 +1206,6 @@ function print(message) {
   process.stderr.write(`${message}\n`);
 }
 
-let _cancel = null;
 function cancelWait() {
   if (_cancel !== null) {
     _cancel();
@@ -1483,10 +1498,6 @@ function responseToError(response, body) {
   });
 }
 
-var AUTH_ERROR = new AvoError(
-  'Command requires authentication, please run ' + bold('avo login')
-);
-
 function requireAuth(argv, cb) {
   let tokens = conf.get('tokens');
   let user = conf.get('user');
@@ -1519,6 +1530,7 @@ process.on('unhandledRejection', err => {
   if (!(err instanceof Error) && !(err instanceof AvoError)) {
     err = new AvoError(`Promise rejected with value: ${util.inspect(err)}`);
   }
+  // console.log('here', err.stack);
   print(err.message);
 
   process.exit(1);
