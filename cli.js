@@ -345,15 +345,6 @@ function init() {
       }
     };
     return writeJsonFile('avo.json', json, {indent: 2}).then(() => {
-      // print(
-      //   success(
-      //     `Successfully initialized Avo workspace ${cyan(
-      //       schema.name
-      //     )} and created ${file('avo.json')}. Run ${cmd(
-      //       'avo pull'
-      //     )} to generate a tracking library`
-      //   )
-      // );
       return json;
     });
   };
@@ -452,7 +443,7 @@ function codegen(json, result) {
   });
 }
 
-function selectSource(json) {
+function selectSource(sourceToAdd, json) {
   wait('Fetching sources');
   return api
     .request('POST', '/c/v1/sources', {
@@ -478,61 +469,190 @@ function selectSource(json) {
         ),
         'name'
       );
-      let choices = sources.map(source => {
-        return {value: source, name: source.name};
-      });
-      return inquirer
-        .prompt([
-          {
-            type: 'list',
-            name: 'source',
-            message: 'Select a source to generate a tracking library for',
-            choices: choices,
-            pageSize: 15
-          },
-          {
-            type: 'directory',
-            name: 'folder',
-            message: 'Select a folder to put the library',
-            basePath: '.'
-          },
-          {
-            type: 'input',
-            name: 'filename',
-            message: 'Select a filename fer the library',
-            default: function(answers) {
-              return answers.source.filenameHint;
-            }
+
+      let prompts = [
+        {
+          type: 'directory',
+          name: 'folder',
+          message: 'Select a folder to put the library',
+          basePath: '.'
+        }
+      ];
+
+      if (!sourceToAdd) {
+        let choices = sources.map(source => {
+          return {value: source, name: source.name};
+        });
+
+        prompts.unshift({
+          type: 'list',
+          name: 'source',
+          message: 'Select a source to generate a tracking library for',
+          choices: choices,
+          pageSize: 15
+        });
+        prompts.push({
+          type: 'input',
+          name: 'filename',
+          message: 'Select a filename fer the library',
+          default: function(answers) {
+            return answers.source.filenameHint;
           }
-        ])
-        .then(answer => {
-          let relativePath = path.relative(
-            process.cwd(),
-            path.join(answer.folder, answer.filename)
+        });
+      } else {
+        let source = _.find(sources, source =>
+          matchesSource(source, sourceToAdd)
+        );
+        if (!source) {
+          throw new AvoError(fail(`Source ${sourceToAdd} does not exist`));
+        }
+        prompts.push({
+          type: 'input',
+          name: 'filename',
+          message: 'Select a filename fer the library',
+          default: function(answers) {
+            return source.filenameHint;
+          }
+        });
+      }
+
+      return inquirer.prompt(prompts).then(answer => {
+        let relativePath = path.relative(
+          process.cwd(),
+          path.join(answer.folder, answer.filename)
+        );
+        let source;
+        if (sourceToAdd) {
+          source = _.find(sources, source =>
+            matchesSource(source, sourceToAdd)
           );
-          let source = {
+          source = {id: source.id, name: source.name, path: relativePath};
+        } else {
+          source = {
             id: answer.source.id,
             name: answer.source.name,
             path: relativePath
           };
-          let sources = _.concat(json.sources || [], [source]);
-          let newJson = Object.assign({}, json, {sources: sources});
-          return writeJsonFile('avo.json', newJson, {indent: 2}).then(() => {
-            print(ok(`Added source ${source.name} to the project`));
-          });
+        }
+        sources = _.concat(json.sources || [], [source]);
+        let newJson = Object.assign({}, json, {sources: sources});
+        return writeJsonFile('avo.json', newJson, {indent: 2}).then(() => {
+          print(ok(`Added source ${source.name} to the project`));
         });
+      });
+
+      if (!sourceToAdd) {
+      } else {
+        let source = _.find(sources, source =>
+          matchesSource(source, sourceToAdd)
+        );
+        if (!source) {
+          throw new AvoError(fail(`Source ${sourceToAdd} does not exist`));
+        } else {
+          json = Object.assign({}, json, {
+            branch: {
+              id: branch.id,
+              name: branch.name
+            }
+          });
+          return writeJsonFile('avo.json', json, {indent: 2}).then(() => {
+            print(info(`Switched to branch '${branch.name} (${branch.id})'`));
+            return json;
+          });
+        }
+        console.log('----');
+      }
     });
 }
 
-function pull(argv, json) {
-  let sourceFilter = argv && argv.source;
+function checkout(branchToCheckout, json) {
+  wait('Fetching branches');
+  return api
+    .request('POST', '/c/v1/branches', {
+      origin: api.apiOrigin,
+      auth: true,
+      data: {
+        schemaId: json.schema.id
+      }
+    })
+    .then(res => {
+      cancelWait();
+      let result = res.body;
+      let branches = _.sortBy(result.branches, 'name');
+
+      if (!branchToCheckout) {
+        let choices = branches.map(branch => {
+          return {value: branch, name: branch.name};
+        });
+        let currentBranch = _.find(
+          branches,
+          branch => branch.id == json.branch.id
+        );
+        inquirer
+          .prompt([
+            {
+              type: 'list',
+              name: 'branch',
+              message: 'Select a branch',
+              default: currentBranch,
+              choices: choices,
+              pageSize: 15
+            }
+          ])
+          .then(answer => {
+            if (answer.branch === currentBranch) {
+              print(info(`Already on '${currentBranch.name}'`));
+              return json;
+            } else {
+              let branch = answer.branch;
+              json = Object.assign({}, json, {
+                branch: {
+                  id: branch.id,
+                  name: branch.name
+                }
+              });
+              return writeJsonFile('avo.json', json, {indent: 2}).then(() => {
+                print(info(`Switched to branch '${branch.name}'`));
+                return json;
+              });
+            }
+          });
+      } else {
+        let branch = _.find(
+          branches,
+          branch => branch.name == branchToCheckout
+        );
+        if (!branch) {
+          throw new AvoError(
+            fail(
+              `Branch ${branchToCheckout} does not exist. Run ${cmd(
+                'avo branch'
+              )} to list available branches`
+            )
+          );
+        } else {
+          json = Object.assign({}, json, {
+            branch: {
+              id: branch.id,
+              name: branch.name
+            }
+          });
+          return writeJsonFile('avo.json', json, {indent: 2}).then(() => {
+            print(info(`Switched to branch '${branch.name}'`));
+            return json;
+          });
+        }
+      }
+    });
+}
+
+function matchesSource(source, filter) {
+  return source.name.toLowerCase() === filter.toLowerCase();
+}
+
+function pull(sourceFilter, json) {
   let sources = sourceFilter
-    ? [
-        _.find(
-          json.sources,
-          source => source.name.toLowerCase() === sourceFilter.toLowerCase()
-        )
-      ]
+    ? [_.find(json.sources, source => matchesSource(source, sourceFilter))]
     : json.sources;
   let sourceNames = _.map(sources, source => source.name);
   wait(`Pulling ${sourceNames.join(', ')}`);
@@ -669,88 +789,7 @@ require('yargs')
     handler: argv => {
       let command = json => {
         requireAuth(argv, () => {
-          // print(info(`Your branch is up to date`));
-          wait('Fetching branches');
-          return api
-            .request('POST', '/c/v1/branches', {
-              origin: api.apiOrigin,
-              auth: true,
-              data: {
-                schemaId: json.schema.id
-              }
-            })
-            .then(res => {
-              cancelWait();
-              let result = res.body;
-              let branches = _.sortBy(result.branches, 'name');
-
-              if (!argv.branch) {
-                let choices = branches.map(branch => {
-                  return {value: branch, name: branch.name};
-                });
-                let currentBranch = _.find(
-                  branches,
-                  branch => branch.id == json.branch.id
-                );
-                inquirer
-                  .prompt([
-                    {
-                      type: 'list',
-                      name: 'branch',
-                      message: 'Select a branch',
-                      default: currentBranch,
-                      choices: choices,
-                      pageSize: 15
-                    }
-                  ])
-                  .then(answer => {
-                    if (answer.branch === currentBranch) {
-                      print(info(`Already on '${currentBranch.name}'`));
-                    } else {
-                      let branch = answer.branch;
-                      writeJsonFile(
-                        'avo.json',
-                        Object.assign({}, json, {
-                          branch: {
-                            id: branch.id,
-                            name: branch.name
-                          }
-                        }),
-                        {indent: 2}
-                      ).then(() => {
-                        print(info(`Switched to branch '${branch.name}'`));
-                      });
-                    }
-                  });
-              } else {
-                let branch = _.find(
-                  branches,
-                  branch => branch.name == argv.branch
-                );
-                if (!branch) {
-                  print(
-                    fail(
-                      `Branch ${argv.branch} does not exist. Run ${cmd(
-                        'avo branch'
-                      )} to list available branches`
-                    )
-                  );
-                } else {
-                  writeJsonFile(
-                    'avo.json',
-                    Object.assign({}, json, {
-                      branch: {
-                        id: branch.id,
-                        name: branch.name
-                      }
-                    }),
-                    {indent: 2}
-                  ).then(() => {
-                    print(info(`Switched to branch '${branch.name}'`));
-                  });
-                }
-              }
-            });
+          checkout(argv.branch, json);
         });
       };
       loadAvoJson()
@@ -779,6 +818,12 @@ require('yargs')
   .command({
     command: 'pull [source]',
     desc: 'Download code from Avo workspace',
+    builder: yargs => {
+      return yargs.option('branch', {
+        describe: 'Name of Avo branch to pull from',
+        type: 'string'
+      });
+    },
     handler: argv => {
       requireAuth(argv, () => {
         loadAvoJsonOrInit().then(json => {
@@ -789,15 +834,26 @@ require('yargs')
             cliInvokedByCi: invokedByCi()
           });
 
-          if (!json.sources) {
-            print(info(`No sources configured.`));
-            selectSource(json).then(() => {
-              loadAvoJson().then(json => {
-                pull(null, json);
+          let go = json => {
+            if (!json.sources) {
+              print(info(`No sources configured.`));
+              return selectSource(argv.source, json).then(() => {
+                return loadAvoJson().then(json => {
+                  return pull(null, json);
+                });
               });
+            } else {
+              return pull(argv.source, json);
+            }
+          };
+
+          if (argv.branch && json.branch.name !== argv.branch) {
+            return checkout(argv.branch, json).then(json => {
+              return go(json);
             });
           } else {
-            pull(argv, json);
+            print(info(`Pulling from branch '${json.branch.name}'`));
+            return go(json);
           }
         });
       });
@@ -860,7 +916,7 @@ require('yargs')
           handler: argv => {
             let command = json => {
               requireAuth(argv, () => {
-                selectSource(json);
+                selectSource(null, json);
               });
             };
             loadAvoJson()
@@ -1530,8 +1586,8 @@ process.on('unhandledRejection', err => {
   if (!(err instanceof Error) && !(err instanceof AvoError)) {
     err = new AvoError(`Promise rejected with value: ${util.inspect(err)}`);
   }
-  // console.log('here', err.stack);
   print(err.message);
+  // print(err.stack);
 
   process.exit(1);
 });
