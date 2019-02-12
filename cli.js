@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 const _ = require('lodash');
 const {cyan, gray, red, bold, underline} = require('chalk');
+const dateFns = require('date-fns');
 const fs = require('fs');
 const http = require('http');
 const inquirer = require('inquirer');
@@ -564,13 +565,15 @@ function checkout(branchToCheckout, json) {
           branches,
           branch => branch.id == json.branch.id
         );
-        inquirer
+        return inquirer
           .prompt([
             {
               type: 'list',
               name: 'branch',
               message: 'Select a branch',
-              default: currentBranch,
+              default:
+                currentBranch ||
+                _.find(branches, branch => branch.id == 'master'),
               choices: choices,
               pageSize: 15
             }
@@ -651,7 +654,21 @@ function pull(sourceFilter, json) {
     .then(res => {
       cancelWait();
       let result = res.body;
-      codegen(json, result);
+      if (result.ok) {
+        codegen(json, result);
+      } else {
+        report.error(
+          `Branch ${result.branchName} was ${
+            result.reason
+          } ${dateFns.distanceInWords(
+            new Date(result.closedAt),
+            new Date()
+          )} ago. Pick another branch.`
+        );
+        checkout(null, json).then(json => {
+          pull(null, json);
+        });
+      }
     });
 }
 
@@ -1454,7 +1471,7 @@ process.on('unhandledRejection', err => {
     err = new AvoError(`Promise rejected with value: ${util.inspect(err)}`);
   }
   report.error(err.message);
-  // print(err.stack);
+  // console.error(err.stack);
 
   process.exit(1);
 });
