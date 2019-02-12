@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 const _ = require('lodash');
 const {cyan, gray, red, bold, underline} = require('chalk');
+const dateFns = require('date-fns');
 const fs = require('fs');
 const http = require('http');
 const inquirer = require('inquirer');
@@ -13,16 +14,18 @@ const path = require('path');
 const portfinder = require('portfinder');
 const querystring = require('querystring');
 const request = require('request');
+const report = require('yurnalist');
 const semver = require('semver');
 const updateNotifier = require('update-notifier');
 const url = require('url');
+const util = require('util');
 const uuidv4 = require('uuid/v4');
 const writeFile = require('write');
 const writeJsonFile = require('write-json-file');
 const Configstore = require('configstore');
 const pkg = require('./package.json');
 
-const analytics = require('./analytics.js');
+const analytics = require('./Avo.js');
 
 const customAnalyticsDestination = {
   make: function make(production) {
@@ -41,14 +44,14 @@ const customAnalyticsDestination = {
   }
 };
 // setup Avo analytics
-analytics.setup_(
-  {validateProperties: false, useProductionKey: true},
+analytics.initAvo(
+  {env: 'prod'},
   {client: analytics.Client.CLI, version: pkg.version},
   customAnalyticsDestination
 );
 
 // register inquirer-file-path
-inquirer.registerPrompt('directory', require('inquirer-select-directory'));
+inquirer.registerPrompt('fuzzypath', require('inquirer-fuzzy-path'));
 
 updateNotifier({pkg: pkg}).notify();
 
@@ -59,6 +62,9 @@ if (!conf.has('avo_install_id')) {
 }
 
 const FIFTEEN_MINUTES_IN_MS = 15 * 60 * 1000;
+
+// to cancel spinners globally
+let _cancel = null;
 
 var nonce = _.random(1, 2 << 29).toString();
 
@@ -80,11 +86,9 @@ function AvoError(message, options) {
 AvoError.prototype = Object.create(Error.prototype);
 
 var INVALID_CREDENTIAL_ERROR = new AvoError(
-  info(
-    `Authentication Error: Your credentials are no longer valid. Please run ${cmd(
-      'avo logout; avo login'
-    )}`
-  ),
+  `Authentication Error: Your credentials are no longer valid. Please run ${cmd(
+    'avo logout; avo login'
+  )}`,
   {exit: 1}
 );
 
@@ -269,12 +273,12 @@ function loadAvoJson() {
   return loadJsonFile('avo.json')
     .then(json => {
       if (avoNeedsUpdate(json)) {
-        throw new AvoError(error(`Your avo CLI is outdated, please update`));
+        throw new AvoError(`Your avo CLI is outdated, please update`);
       }
 
       if (isLegacyAvoJson(json)) {
         throw new AvoError(
-          error(`Project is not initialized. Run ${cmd('avo init')}`)
+          `Project is not initialized. Run ${cmd('avo init')}`
         );
       }
 
@@ -288,12 +292,95 @@ function loadAvoJson() {
     .catch(err => {
       if (err.code === 'ENOENT') {
         throw new AvoError(
-          error(
-            `File ${file('avo.json')} does not exist. Run ${cmd('avo init')}`
-          )
+          `File ${file('avo.json')} does not exist. Run ${cmd('avo init')}`
         );
       } else {
         throw err;
+      }
+    });
+}
+
+function loadAvoJsonOrInit() {
+  return loadJsonFile('avo.json')
+    .then(json => {
+      if (avoNeedsUpdate(json)) {
+        throw new AvoError(`Your avo CLI is outdated, please update`);
+      }
+
+      if (isLegacyAvoJson(json)) {
+        return init();
+      }
+
+      // augment the latest major version into avo.json
+      json.avo = Object.assign({}, json.avo || {}, {
+        version: semver.major(pkg.version)
+      });
+
+      return json;
+    })
+    .catch(err => {
+      if (err.code === 'ENOENT') {
+        return init();
+      } else {
+        throw err;
+      }
+    });
+}
+
+function init() {
+  let writeAvoJson = schema => {
+    let json = {
+      avo: {
+        version: semver.major(pkg.version)
+      },
+      schema: {
+        id: schema.id,
+        name: schema.name
+      },
+      branch: {
+        id: 'master',
+        name: 'master'
+      }
+    };
+    return writeJsonFile('avo.json', json, {indent: 2}).then(() => {
+      return json;
+    });
+  };
+  wait('Fetching workspaces');
+  return api
+    .request('GET', '/c/v1/workspaces', {
+      origin: api.apiOrigin,
+      auth: true
+    })
+    .then(res => {
+      cancelWait();
+      let result = res.body;
+      let schemas = _.orderBy(result.workspaces, 'lastUsedAt', 'desc');
+      if (schemas.length > 1) {
+        let choices = schemas.map(schema => {
+          return {value: schema, name: schema.name};
+        });
+        return inquirer
+          .prompt([
+            {
+              type: 'list',
+              name: 'schema',
+              message: 'Select a workspace to initialize',
+              choices: choices
+            }
+          ])
+          .then(answer => {
+            return writeAvoJson(answer.schema);
+          });
+      } else if (schemas.length === 0) {
+        throw new AvoError(
+          `No workspaces to initialize. Go to ${link(
+            'wwww.avo.app'
+          )} to create one`
+        );
+      } else {
+        let schema = schemas[0];
+        return writeAvoJson(schema);
       }
     });
 }
@@ -331,22 +418,27 @@ function codegen(json, result) {
   });
 
   Promise.all(_.concat([avoJsonTask], sourceTasks)).then(() => {
+    report.success(
+      `Tracking ${
+        targets.length > 1 ? 'libraries' : 'library'
+      } successfully updated`
+    );
     targets.forEach(target => {
       let source = _.find(newJson.sources, source => source.id === target.id);
-      if (target.code.length === 1) {
-        print(ok(`Updated source ${source.name}: ${file(source.path)}`));
-      } else if (target.code.length > 1) {
-        print(ok(`Updated source ${source.name}:`));
-        target.code.forEach(code => {
-          print(selected(`${file(code.path)}`));
-        });
-      }
+      report.tree('sources', [
+        {
+          name: source.name,
+          children: target.code.map(code => {
+            return {name: code.path};
+          })
+        }
+      ]);
     });
   });
 }
 
-function selectSource(json) {
-  let cancelWait = wait('Fetching sources');
+function selectSource(sourceToAdd, json) {
+  wait('Fetching sources');
   return api
     .request('POST', '/c/v1/sources', {
       origin: api.apiOrigin,
@@ -371,73 +463,182 @@ function selectSource(json) {
         ),
         'name'
       );
-      let choices = sources.map(source => {
-        return {value: source, name: source.name};
-      });
-      return inquirer
-        .prompt([
-          {
-            type: 'list',
-            name: 'source',
-            message: 'Select a source to generate a tracking library for',
-            choices: choices,
-            pageSize: 15
-          },
-          {
-            type: 'directory',
-            name: 'folder',
-            message: 'Select a folder to put the library',
-            basePath: '.'
-          },
-          {
-            type: 'input',
-            name: 'filename',
-            message: 'Select a filename fer the library',
-            default: function(answers) {
-              return answers.source.filenameHint;
-            }
+
+      let prompts = [
+        {
+          type: 'fuzzypath',
+          name: 'folder',
+          excludePath: path =>
+            path.startsWith('node_modules') || path.startsWith('.git'),
+          itemType: 'directory',
+          rootPath: '',
+          message: 'Select a folder to put the library',
+          default: '',
+          suggestOnly: false
+        }
+      ];
+
+      if (!sourceToAdd) {
+        let choices = sources.map(source => {
+          return {value: source, name: source.name};
+        });
+
+        prompts.unshift({
+          type: 'list',
+          name: 'source',
+          message: 'Select a source to generate a tracking library for',
+          choices: choices,
+          pageSize: 15
+        });
+        prompts.push({
+          type: 'input',
+          name: 'filename',
+          message: 'Select a filename fer the library',
+          default: function(answers) {
+            return answers.source.filenameHint;
           }
-        ])
-        .then(answer => {
-          let relativePath = path.relative(
-            process.cwd(),
-            path.join(answer.folder, answer.filename)
+        });
+      } else {
+        let source = _.find(sources, source =>
+          matchesSource(source, sourceToAdd)
+        );
+        if (!source) {
+          throw new AvoError(`Source ${sourceToAdd} does not exist`);
+        }
+        prompts.push({
+          type: 'input',
+          name: 'filename',
+          message: 'Select a filename fer the library',
+          default: function(answers) {
+            return source.filenameHint;
+          }
+        });
+      }
+
+      return inquirer.prompt(prompts).then(answer => {
+        let relativePath = path.relative(
+          process.cwd(),
+          path.join(path.resolve(answer.folder), answer.filename)
+        );
+        let source;
+        if (sourceToAdd) {
+          source = _.find(sources, source =>
+            matchesSource(source, sourceToAdd)
           );
-          let source = {
+          source = {id: source.id, name: source.name, path: relativePath};
+        } else {
+          source = {
             id: answer.source.id,
             name: answer.source.name,
             path: relativePath
           };
-          let sources = _.concat(json.sources || [], [source]);
-          let newJson = Object.assign({}, json, {sources: sources});
-          return writeJsonFile('avo.json', newJson, {indent: 2}).then(() => {
-            print(
-              ok(
-                `Added source ${source.name} to the project. Run ${cmd(
-                  'avo pull ' +
-                    (source.name.indexOf(' ') > -1
-                      ? '"' + source.name + '"'
-                      : source.name)
-                )} to generate tracking library`
-              )
-            );
-          });
+        }
+        sources = _.concat(json.sources || [], [source]);
+        let newJson = Object.assign({}, json, {sources: sources});
+        return writeJsonFile('avo.json', newJson, {indent: 2}).then(() => {
+          report.info(`Added source ${source.name} to the project`);
         });
+      });
     });
 }
 
-function pull(argv, json) {
-  let sourceFilter = argv && argv.source;
+function checkout(branchToCheckout, json) {
+  wait('Fetching branches');
+  return api
+    .request('POST', '/c/v1/branches', {
+      origin: api.apiOrigin,
+      auth: true,
+      data: {
+        schemaId: json.schema.id
+      }
+    })
+    .then(res => {
+      cancelWait();
+      let result = res.body;
+      let branches = _.sortBy(result.branches, 'name');
+
+      if (!branchToCheckout) {
+        let choices = branches.map(branch => {
+          return {value: branch, name: branch.name};
+        });
+        let currentBranch = _.find(
+          branches,
+          branch => branch.id == json.branch.id
+        );
+        return inquirer
+          .prompt([
+            {
+              type: 'list',
+              name: 'branch',
+              message: 'Select a branch',
+              default:
+                currentBranch ||
+                _.find(branches, branch => branch.id == 'master'),
+              choices: choices,
+              pageSize: 15
+            }
+          ])
+          .then(answer => {
+            if (answer.branch === currentBranch) {
+              report.info(`Already on '${currentBranch.name}'`);
+              return json;
+            } else {
+              let branch = answer.branch;
+              json = Object.assign({}, json, {
+                branch: {
+                  id: branch.id,
+                  name: branch.name
+                }
+              });
+              return writeJsonFile('avo.json', json, {indent: 2}).then(() => {
+                report.info(`Switched to branch '${branch.name}'`);
+                return json;
+              });
+            }
+          });
+      } else {
+        if (branchToCheckout == json.branch.name) {
+          // XXX should check here if json.branch.id === branch.id from server
+          // if not, it indicates branch delete, same branch re-created and client is out of sync
+          report.info(`Already on '${branchToCheckout}'`);
+          return json;
+        }
+        let branch = _.find(
+          branches,
+          branch => branch.name == branchToCheckout
+        );
+        if (!branch) {
+          throw new AvoError(
+            `Branch '${branchToCheckout}' does not exist. Run ${cmd(
+              'avo branch'
+            )} to list available branches`
+          );
+        } else {
+          json = Object.assign({}, json, {
+            branch: {
+              id: branch.id,
+              name: branch.name
+            }
+          });
+          return writeJsonFile('avo.json', json, {indent: 2}).then(() => {
+            report.info(`Switched to branch '${branch.name}'`);
+            return json;
+          });
+        }
+      }
+    });
+}
+
+function matchesSource(source, filter) {
+  return source.name.toLowerCase() === filter.toLowerCase();
+}
+
+function pull(sourceFilter, json) {
   let sources = sourceFilter
-    ? [
-        _.find(
-          json.sources,
-          source => source.name.toLowerCase() === sourceFilter.toLowerCase()
-        )
-      ]
+    ? [_.find(json.sources, source => matchesSource(source, sourceFilter))]
     : json.sources;
   let sourceNames = _.map(sources, source => source.name);
-  let cancelWait = wait(`Pulling ${sourceNames.join(', ')}`);
+  wait(`Pulling ${sourceNames.join(', ')}`);
   return api
     .request('POST', '/c/v1/pull', {
       origin: api.apiOrigin,
@@ -453,7 +654,21 @@ function pull(argv, json) {
     .then(res => {
       cancelWait();
       let result = res.body;
-      codegen(json, result);
+      if (result.ok) {
+        codegen(json, result);
+      } else {
+        report.error(
+          `Branch ${result.branchName} was ${
+            result.reason
+          } ${dateFns.distanceInWords(
+            new Date(result.closedAt),
+            new Date()
+          )} ago. Pick another branch.`
+        );
+        checkout(null, json).then(json => {
+          pull(null, json);
+        });
+      }
     });
 }
 
@@ -498,292 +713,114 @@ require('yargs')
         let json = loadJsonFile.sync('avo.json');
         if (!isLegacyAvoJson(json)) {
           let schema = json.schema;
-          print(
-            info(
-              `Avo is already initialized (${cyan(schema.name)}): ${file(
-                'avo.json'
-              )} exists`
-            )
+          report.info(
+            `Avo is already initialized (${cyan(schema.name)}): ${file(
+              'avo.json'
+            )} exists`
           );
           return;
         }
       }
-      let writeAvoJson = schema => {
-        return writeJsonFile(
-          'avo.json',
-          {
-            avo: {
-              version: semver.major(pkg.version)
-            },
-            schema: {
-              id: schema.id,
-              name: schema.name
-            },
-            branch: {
-              id: 'master',
-              name: 'master'
-            }
-          },
-          {indent: 2}
-        ).then(() => {
-          print(
-            success(
-              `Successfully initialized Avo workspace ${cyan(
-                schema.name
-              )} and created ${file('avo.json')}. Run ${cmd(
-                'avo pull'
-              )} to generate a tracking library`
-            )
-          );
-        });
-      };
-      let cancelWait = wait('Fetching workspaces');
       requireAuth(argv, () => {
-        return api
-          .request('GET', '/c/v1/workspaces', {
-            origin: api.apiOrigin,
-            auth: true
-          })
-          .then(res => {
-            cancelWait();
-            let result = res.body;
-            let schemas = _.orderBy(result.workspaces, 'lastUsedAt', 'desc');
-            if (schemas.length > 1) {
-              let choices = schemas.map(schema => {
-                return {value: schema, name: schema.name};
-              });
-              inquirer
-                .prompt([
-                  {
-                    type: 'list',
-                    name: 'schema',
-                    message: 'Select a workspace to initialize',
-                    choices: choices
-                  }
-                ])
-                .then(answer => {
-                  return writeAvoJson(answer.schema);
-                });
-            } else if (schemas.length === 0) {
-              print(
-                warn(
-                  `No workspaces to initialize. Go to ${link(
-                    'wwww.avo.app'
-                  )} to create one`
-                )
-              );
-            } else {
-              let schema = schemas[0];
-              writeAvoJson(schema);
-            }
-          });
+        init();
       });
     }
   })
   .command({
-    command: 'branch',
-    desc: 'List branches',
-    handler: argv => {
-      let command = json => {
-        requireAuth(argv, () => {
-          let cancelWait = wait('Fetching branches');
-          return api
-            .request('POST', '/c/v1/branches', {
-              origin: api.apiOrigin,
-              auth: true,
-              data: {
-                schemaId: json.schema.id
-              }
-            })
-            .then(res => {
-              cancelWait();
-              let result = res.body;
-              let branches = _.sortBy(result.branches, 'name');
-              branches.forEach(branch => {
-                if (branch.id === json.branch.id) {
-                  print(selected(branch.name));
-                } else {
-                  print(item(branch.name));
-                }
-              });
-            });
-        });
-      };
-      loadAvoJson()
-        .then(json => {
-          analytics.cliInvoked({
-            schemaId: json.schema.id,
-            userId_: installIdOrUserId(),
-            cliAction: analytics.CliAction.BRANCH,
-            cliInvokedByCi: invokedByCi()
-          });
-          command(json);
-        })
-        .catch(err => {
-          if (err instanceof AvoError) {
-            print(err.message);
-          }
-          analytics.cliInvoked({
-            schemaId: 'N/A',
-            userId_: installIdOrUserId(),
-            cliAction: analytics.CliAction.BRANCH,
-            cliInvokedByCi: invokedByCi()
-          });
-        });
-    }
-  })
-  .command({
     command: 'checkout [branch]',
+    aliases: ['branch'],
     desc: 'Switch branches',
     handler: argv => {
       let command = json => {
         requireAuth(argv, () => {
-          // print(info(`Your branch is up to date`));
-          let cancelWait = wait('Fetching branches');
-          return api
-            .request('POST', '/c/v1/branches', {
-              origin: api.apiOrigin,
-              auth: true,
-              data: {
-                schemaId: json.schema.id
-              }
-            })
-            .then(res => {
-              cancelWait();
-              let result = res.body;
-              let branches = _.sortBy(result.branches, 'name');
-
-              if (!argv.branch) {
-                let choices = branches.map(branch => {
-                  return {value: branch, name: branch.name};
-                });
-                let currentBranch = _.find(
-                  branches,
-                  branch => branch.id == json.branch.id
-                );
-                inquirer
-                  .prompt([
-                    {
-                      type: 'list',
-                      name: 'branch',
-                      message: 'Select a branch',
-                      default: currentBranch,
-                      choices: choices,
-                      pageSize: 15
-                    }
-                  ])
-                  .then(answer => {
-                    if (answer.branch === currentBranch) {
-                      print(info(`Already on '${currentBranch.name}'`));
-                    } else {
-                      let branch = answer.branch;
-                      writeJsonFile(
-                        'avo.json',
-                        Object.assign({}, json, {
-                          branch: {
-                            id: branch.id,
-                            name: branch.name
-                          }
-                        }),
-                        {indent: 2}
-                      ).then(() => {
-                        print(info(`Switched to branch '${branch.name}'`));
-                      });
-                    }
-                  });
-              } else {
-                let branch = _.find(
-                  branches,
-                  branch => branch.name == argv.branch
-                );
-                if (!branch) {
-                  print(
-                    fail(
-                      `Branch ${argv.branch} does not exist. Run ${cmd(
-                        'avo branch'
-                      )} to list available branches`
-                    )
-                  );
-                } else {
-                  writeJsonFile(
-                    'avo.json',
-                    Object.assign({}, json, {
-                      branch: {
-                        id: branch.id,
-                        name: branch.name
-                      }
-                    }),
-                    {indent: 2}
-                  ).then(() => {
-                    print(info(`Switched to branch '${branch.name}'`));
-                  });
-                }
-              }
-            });
+          checkout(argv.branch, json);
         });
       };
-      loadAvoJson()
-        .then(json => {
-          analytics.cliInvoked({
-            schemaId: json.schema.id,
-            userId_: installIdOrUserId(),
-            cliAction: analytics.CliAction.CHECKOUT,
-            cliInvokedByCi: invokedByCi()
-          });
-          command(json);
-        })
-        .catch(err => {
-          if (err instanceof AvoError) {
-            print(err.message);
-          }
-          analytics.cliInvoked({
-            schemaId: 'N/A',
-            userId_: installIdOrUserId(),
-            cliAction: analytics.CliAction.CHECKOUT,
-            cliInvokedByCi: invokedByCi()
-          });
+      loadAvoJson().then(json => {
+        analytics.cliInvoked({
+          schemaId: json.schema.id,
+          userId_: installIdOrUserId(),
+          cliAction: analytics.CliAction.CHECKOUT,
+          cliInvokedByCi: invokedByCi()
         });
+        command(json);
+      });
+    }
+  })
+  .command({
+    command: 'status',
+    desc: 'Show the status of the Avo project',
+    handler: argv => {
+      let command = json => {
+        requireAuth(argv, () => {
+          report.info(`On branch '${json.branch.name}'`);
+        });
+      };
+      loadAvoJson().then(json => {
+        analytics.cliInvoked({
+          schemaId: json.schema.id,
+          userId_: installIdOrUserId(),
+          cliAction: analytics.CliAction.STATUS,
+          cliInvokedByCi: invokedByCi()
+        });
+        command(json);
+      });
     }
   })
   .command({
     command: 'pull [source]',
     desc: 'Download code from Avo workspace',
+    builder: yargs => {
+      return yargs.option('branch', {
+        describe: 'Name of Avo branch to pull from',
+        type: 'string'
+      });
+    },
     handler: argv => {
-      let command = json => {
-        requireAuth(argv, () => {
-          if (!json.sources) {
-            print(info(`No sources configured.`));
-            selectSource(json).then(() => {
-              loadAvoJson().then(json => {
-                pull(null, json);
-              });
-            });
-          } else {
-            pull(argv, json);
-          }
-        });
-      };
-      loadAvoJson()
-        .then(json => {
+      requireAuth(argv, () => {
+        loadAvoJsonOrInit().then(json => {
           analytics.cliInvoked({
             schemaId: json.schema.id,
             userId_: installIdOrUserId(),
             cliAction: analytics.CliAction.PULL,
             cliInvokedByCi: invokedByCi()
           });
-          command(json);
-        })
-        .catch(err => {
-          if (err instanceof AvoError) {
-            print(err.message);
+
+          let go = json => {
+            if (!json.sources || !json.sources.length) {
+              report.log(`No sources configured.`);
+              return selectSource(argv.source, json).then(() => {
+                return loadAvoJson().then(json => {
+                  return pull(null, json);
+                });
+              });
+            } else if (
+              argv.source &&
+              !_.find(json.sources, source =>
+                matchesSource(source, argv.source)
+              )
+            ) {
+              report.log(`Source ${argv.source} not found`);
+              return selectSource(argv.source, json).then(() => {
+                return loadAvoJson().then(json => {
+                  return pull(null, json);
+                });
+              });
+            } else {
+              return pull(argv.source, json);
+            }
+          };
+
+          if (argv.branch && json.branch.name !== argv.branch) {
+            return checkout(argv.branch, json).then(json => {
+              return go(json);
+            });
+          } else {
+            report.info(`Pulling from branch '${json.branch.name}'`);
+            return go(json);
           }
-          analytics.cliInvoked({
-            schemaId: 'N/A',
-            userId_: installIdOrUserId(),
-            cliAction: analytics.CliAction.PULL,
-            cliInvokedByCi: invokedByCi()
-          });
         });
+      });
     }
   })
   .command({
@@ -797,76 +834,53 @@ require('yargs')
           handler: argv => {
             let command = json => {
               requireAuth(argv, () => {
-                if (!json.sources) {
-                  print(
-                    info(
-                      `No sources defined in ${file('avo.json')}. Run ${cmd(
-                        'avo source add'
-                      )} to add sources`
-                    )
+                if (!json.sources || !json.sources.length) {
+                  report.info(
+                    `No sources defined in ${file('avo.json')}. Run ${cmd(
+                      'avo source add'
+                    )} to add sources`
                   );
                   return;
                 }
 
-                print(info(`In this project:`));
-                _.each(json.sources, source => {
-                  print(selected(`${source.name}: ${file(source.path)}`));
-                });
+                report.info(`Sources in this project:`);
+                report.tree(
+                  'sources',
+                  json.sources.map(source => {
+                    return {name: source.name, children: [{name: source.path}]};
+                  })
+                );
               });
             };
-            loadAvoJson()
-              .then(json => {
-                analytics.cliInvoked({
-                  schemaId: json.schema.id,
-                  userId_: installIdOrUserId(),
-                  cliAction: analytics.CliAction.SOURCE,
-                  cliInvokedByCi: invokedByCi()
-                });
-                command(json);
-              })
-              .catch(err => {
-                if (err instanceof AvoError) {
-                  print(err.message);
-                }
-                analytics.cliInvoked({
-                  schemaId: 'N/A',
-                  userId_: installIdOrUserId(),
-                  cliAction: analytics.CliAction.SOURCE,
-                  cliInvokedByCi: invokedByCi()
-                });
+            loadAvoJson().then(json => {
+              analytics.cliInvoked({
+                schemaId: json.schema.id,
+                userId_: installIdOrUserId(),
+                cliAction: analytics.CliAction.SOURCE,
+                cliInvokedByCi: invokedByCi()
               });
+              command(json);
+            });
           }
         })
         .command({
-          command: 'add',
+          command: 'add [source]',
           desc: 'Add a source to this project',
           handler: argv => {
             let command = json => {
               requireAuth(argv, () => {
-                selectSource(json);
+                selectSource(argv.source, json);
               });
             };
-            loadAvoJson()
-              .then(json => {
-                analytics.cliInvoked({
-                  schemaId: json.schema.id,
-                  userId_: installIdOrUserId(),
-                  cliAction: analytics.CliAction.SOURCE_ADD,
-                  cliInvokedByCi: invokedByCi()
-                });
-                command(json);
-              })
-              .catch(err => {
-                if (err instanceof AvoError) {
-                  print(err.message);
-                }
-                analytics.cliInvoked({
-                  schemaId: 'N/A',
-                  userId_: installIdOrUserId(),
-                  cliAction: analytics.CliAction.SOURCE_ADD,
-                  cliInvokedByCi: invokedByCi()
-                });
+            loadAvoJson().then(json => {
+              analytics.cliInvoked({
+                schemaId: json.schema.id,
+                userId_: installIdOrUserId(),
+                cliAction: analytics.CliAction.SOURCE_ADD,
+                cliInvokedByCi: invokedByCi()
               });
+              command(json);
+            });
           }
         })
         .command({
@@ -876,24 +890,20 @@ require('yargs')
           handler: argv => {
             let command = json => {
               requireAuth(argv, () => {
-                if (!json.sources) {
-                  print(
-                    info(
-                      `No sources defined in ${file('avo.json')}. Run ${cmd(
-                        'avo source add'
-                      )} to add sources`
-                    )
+                if (!json.sources || !json.sources.length) {
+                  report.warn(
+                    `No sources defined in ${file('avo.json')}. Run ${cmd(
+                      'avo source add'
+                    )} to add sources`
                   );
                   return;
                 }
 
-                let targetSource = _.find(json.sources, source => {
-                  return (
-                    source.name.toLowerCase() === argv.source.toLowerCase()
-                  );
-                });
+                let targetSource = _.find(json.sources, source =>
+                  matchesSource(source, argv.source)
+                );
                 if (!targetSource) {
-                  print(fail(`Source ${argv.source} not found in project.`));
+                  report.error(`Source ${argv.source} not found in project.`);
                   return;
                 }
 
@@ -919,43 +929,29 @@ require('yargs')
                         indent: 2
                       }).then(() => {
                         // XXX ask to remove file as well?
-                        print(
-                          ok(`Removed source ${targetSource.name} from project`)
+                        report.info(
+                          `Removed source ${targetSource.name} from project`
                         );
                       });
                     } else {
-                      print(
-                        info(
-                          `Did not remove source ${
-                            targetSource.name
-                          } from project`
-                        )
+                      report.info(
+                        `Did not remove source ${
+                          targetSource.name
+                        } from project`
                       );
                     }
                   });
               });
             };
-            loadAvoJson()
-              .then(json => {
-                analytics.cliInvoked({
-                  schemaId: json.schema.id,
-                  userId_: installIdOrUserId(),
-                  cliAction: analytics.CliAction.SOURCE_REMOVE,
-                  cliInvokedByCi: invokedByCi()
-                });
-                command(json);
-              })
-              .catch(err => {
-                if (err instanceof AvoError) {
-                  print(err.message);
-                }
-                analytics.cliInvoked({
-                  schemaId: 'N/A',
-                  userId_: installIdOrUserId(),
-                  cliAction: analytics.CliAction.SOURCE_REMOVE,
-                  cliInvokedByCi: invokedByCi()
-                });
+            loadAvoJson().then(json => {
+              analytics.cliInvoked({
+                schemaId: json.schema.id,
+                userId_: installIdOrUserId(),
+                cliAction: analytics.CliAction.SOURCE_REMOVE,
+                cliInvokedByCi: invokedByCi()
               });
+              command(json);
+            });
           }
         });
     }
@@ -967,33 +963,21 @@ require('yargs')
       let command = json => {
         const schema = json.schema;
         const url = `https://www.avo.app/schemas/${schema.id}`;
-        print(
-          info(`Opening ${cyan(schema.name)} workspace in Avo: ${link(url)}`)
+        report.info(
+          `Opening ${cyan(schema.name)} workspace in Avo: ${link(url)}`
         );
         opn(url, {wait: false});
       };
 
-      loadAvoJson()
-        .then(json => {
-          analytics.cliInvoked({
-            schemaId: json.schema.id,
-            userId_: installIdOrUserId(),
-            cliAction: analytics.CliAction.EDIT,
-            cliInvokedByCi: invokedByCi()
-          });
-          command(json);
-        })
-        .catch(err => {
-          if (err instanceof AvoError) {
-            print(err.message);
-          }
-          analytics.cliInvoked({
-            schemaId: 'N/A',
-            userId_: installIdOrUserId(),
-            cliAction: analytics.CliAction.EDIT,
-            cliInvokedByCi: invokedByCi()
-          });
+      loadAvoJson().then(json => {
+        analytics.cliInvoked({
+          schemaId: json.schema.id,
+          userId_: installIdOrUserId(),
+          cliAction: analytics.CliAction.EDIT,
+          cliInvokedByCi: invokedByCi()
         });
+        command(json);
+      });
     }
   })
   .command({
@@ -1003,7 +987,7 @@ require('yargs')
       let command = () => {
         let user = conf.get('user');
         if (user) {
-          print(info(`Already logged in as ${email(user.email)}`));
+          report.info(`Already logged in as ${email(user.email)}`);
           return;
         }
         login()
@@ -1017,7 +1001,7 @@ require('yargs')
               cliInvokedByCi: invokedByCi()
             });
 
-            print(success(`Logged in as ${email(result.user.email)}`));
+            report.success(`Logged in as ${email(result.user.email)}`);
           })
           .catch(() => {
             analytics.signInFailed({
@@ -1040,6 +1024,8 @@ require('yargs')
           command();
         })
         .catch(() => {
+          // NOTE this catch handler may not be deleted,
+          // we always want to issue the command()
           analytics.cliInvoked({
             schemaId: 'N/A',
             userId_: installIdOrUserId(),
@@ -1072,9 +1058,9 @@ require('yargs')
           } else {
             msg += ' token "' + bold(token) + '"';
           }
-          print(info(msg));
+          report.log(msg);
         } else {
-          print(info(`No need to logout, you're not logged in`));
+          report.log(`No need to logout, you're not logged in`);
         }
       };
 
@@ -1089,6 +1075,8 @@ require('yargs')
           command();
         })
         .catch(() => {
+          // NOTE this catch handler may not be deleted,
+          // we always want to issue the command()
           analytics.cliInvoked({
             schemaId: 'N/A',
             userId_: installIdOrUserId(),
@@ -1107,9 +1095,9 @@ require('yargs')
         requireAuth(argv, () => {
           if (conf.has('user')) {
             let user = conf.get('user');
-            print(info(`Logged in as ${email(user.email)}`));
+            report.info(`Logged in as ${email(user.email)}`);
           } else {
-            print(error(`Not logged in`));
+            report.warn(`Not logged in`);
           }
         });
       };
@@ -1125,6 +1113,8 @@ require('yargs')
           command();
         })
         .catch(() => {
+          // NOTE this catch handler may not be deleted,
+          // we always want to issue the command()
           analytics.cliInvoked({
             schemaId: 'N/A',
             userId_: installIdOrUserId(),
@@ -1141,36 +1131,8 @@ require('yargs')
 /////////////////////////////////////////////////////////////////////////
 // LOGGING
 
-function error(message) {
-  return `${red('> Error!')} ${message}`;
-}
-
-function success(message) {
-  return `${cyan('> Success!')} ${message}`;
-}
-
-function ok(message) {
-  return `${logSymbols.success} ${message}`;
-}
-
-function fail(message) {
-  return `${logSymbols.error} ${message}`;
-}
-
 function cmd(command) {
   return `${gray('`')}${cyan(command)}${gray('`')}`;
-}
-
-function info(message) {
-  return `${gray('>')} ${message}`;
-}
-
-function selected(message) {
-  return `${gray('*')} ${message}`;
-}
-
-function item(message) {
-  return `  ${message}`;
 }
 
 function link(url) {
@@ -1185,11 +1147,14 @@ function email(email) {
   return underline(email);
 }
 
-function print(message) {
-  process.stderr.write(`${message}\n`);
+function cancelWait() {
+  if (_cancel !== null) {
+    _cancel();
+    _cancel = null;
+  }
 }
-
 function wait(message, timeOut) {
+  cancelWait();
   timeOut = timeOut || 300;
   let running = false;
   let spinner;
@@ -1215,7 +1180,7 @@ function wait(message, timeOut) {
   };
 
   process.on('nowExit', cancel);
-  return cancel;
+  cancelWait = cancel;
 }
 
 /////////////////////////////////////////////////////////////////////////
@@ -1303,7 +1268,6 @@ function _loginWithLocalhost(port) {
   return new Promise(function(resolve, reject) {
     var callbackUrl = _getCallbackUrl(port);
     var authUrl = _getLoginUrl(callbackUrl);
-    let cancelWait;
 
     var server = http.createServer(function(req, res) {
       var tokens;
@@ -1341,8 +1305,8 @@ function _loginWithLocalhost(port) {
     server = require('http-shutdown')(server);
 
     server.listen(port, function() {
-      print(info(`Visit this URL on any device to login: ${link(authUrl)}`));
-      cancelWait = wait(`Waiting for authentication...`);
+      report.info(`Visit this URL on any device to login: ${link(authUrl)}`);
+      wait(`Waiting for authentication...`);
 
       opn(authUrl, {wait: false});
     });
@@ -1357,7 +1321,7 @@ function _loginWithoutLocalhost() {
   var callbackUrl = _getCallbackUrl();
   var authUrl = _getLoginUrl(callbackUrl);
 
-  print(info(`Visit this URL on any device to login: ${url(authUrl)}`));
+  report.info(`Visit this URL on any device to login: ${url(authUrl)}`);
 
   opn(authUrl, {wait: false});
 }
@@ -1452,11 +1416,8 @@ function responseToError(response, body) {
     };
   }
 
-  var message =
-    'HTTP Error: ' +
-    response.statusCode +
-    ', ' +
-    (body.error.message || body.error);
+  var message = `HTTP Error: ${response.statusCode}, ${body.error.message ||
+    body.error}`;
 
   var exitCode;
   if (response.statusCode >= 500) {
@@ -1477,10 +1438,6 @@ function responseToError(response, body) {
   });
 }
 
-var AUTH_ERROR = new AvoError(
-  'Command requires authentication, please run ' + bold('avo login')
-);
-
 function requireAuth(argv, cb) {
   let tokens = conf.get('tokens');
   let user = conf.get('user');
@@ -1493,7 +1450,7 @@ function requireAuth(argv, cb) {
   }
 
   if (!user || !tokens) {
-    print(error(`Command requires authentication. Run ${cmd('avo login')}`));
+    report.error(`Command requires authentication. Run ${cmd('avo login')}`);
     process.exit(1);
     return;
   }
@@ -1503,3 +1460,18 @@ function requireAuth(argv, cb) {
   api.setRefreshToken(tokens.refreshToken);
   return cb();
 }
+
+//////////////////// ////////
+// catch unhandled promises
+
+process.on('unhandledRejection', err => {
+  cancelWait();
+
+  if (!(err instanceof Error) && !(err instanceof AvoError)) {
+    err = new AvoError(`Promise rejected with value: ${util.inspect(err)}`);
+  }
+  report.error(err.message);
+  // console.error(err.stack);
+
+  process.exit(1);
+});

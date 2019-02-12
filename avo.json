@@ -1,4 +1,7 @@
 {
+  "avo": {
+    "version": 1
+  },
   "schema": {
     "id": "fwtXqAc0fCLy7b7oGW40",
     "name": "Avo"
@@ -9,15 +12,12 @@
   },
   "sources": [
     {
-      "actionId": "RnkKnMFYGSyfJrjxtcP2",
+      "actionId": "nrNiuzVWUA1vZI135cxR",
       "name": "Cli",
       "id": "xOUFa-ew2",
-      "path": "analytics.js",
+      "path": "Avo.js",
       "branchId": "master",
-      "updatedAt": "2019-01-18T05:55:16.516Z"
+      "updatedAt": "2019-02-12T06:22:16.250Z"
     }
-  ],
-  "avo": {
-    "version": 1
-  }
+  ]
 }
