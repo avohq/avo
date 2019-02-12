@@ -731,6 +731,26 @@ require('yargs')
     }
   })
   .command({
+    command: 'status',
+    desc: 'Show the status of the Avo project',
+    handler: argv => {
+      let command = json => {
+        requireAuth(argv, () => {
+          report.info(`On branch '${json.branch.name}'`);
+        });
+      };
+      loadAvoJson().then(json => {
+        analytics.cliInvoked({
+          schemaId: json.schema.id,
+          userId_: installIdOrUserId(),
+          cliAction: analytics.CliAction.STATUS,
+          cliInvokedByCi: invokedByCi()
+        });
+        command(json);
+      });
+    }
+  })
+  .command({
     command: 'pull [source]',
     desc: 'Download code from Avo workspace',
     builder: yargs => {
