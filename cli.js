@@ -705,7 +705,8 @@ require('yargs')
     }
   })
   .command({
-    command: ['checkout [branch]', 'branch'],
+    command: 'checkout [branch]',
+    aliases: ['branch'],
     desc: 'Switch branches',
     handler: argv => {
       let command = json => {
@@ -713,27 +714,15 @@ require('yargs')
           checkout(argv.branch, json);
         });
       };
-      loadAvoJson()
-        .then(json => {
-          analytics.cliInvoked({
-            schemaId: json.schema.id,
-            userId_: installIdOrUserId(),
-            cliAction: analytics.CliAction.CHECKOUT,
-            cliInvokedByCi: invokedByCi()
-          });
-          command(json);
-        })
-        .catch(err => {
-          if (err instanceof AvoError) {
-            print(err.message);
-          }
-          analytics.cliInvoked({
-            schemaId: 'N/A',
-            userId_: installIdOrUserId(),
-            cliAction: analytics.CliAction.CHECKOUT,
-            cliInvokedByCi: invokedByCi()
-          });
+      loadAvoJson().then(json => {
+        analytics.cliInvoked({
+          schemaId: json.schema.id,
+          userId_: installIdOrUserId(),
+          cliAction: analytics.CliAction.CHECKOUT,
+          cliInvokedByCi: invokedByCi()
         });
+        command(json);
+      });
     }
   })
   .command({
@@ -821,27 +810,15 @@ require('yargs')
                 );
               });
             };
-            loadAvoJson()
-              .then(json => {
-                analytics.cliInvoked({
-                  schemaId: json.schema.id,
-                  userId_: installIdOrUserId(),
-                  cliAction: analytics.CliAction.SOURCE,
-                  cliInvokedByCi: invokedByCi()
-                });
-                command(json);
-              })
-              .catch(err => {
-                if (err instanceof AvoError) {
-                  print(err.message);
-                }
-                analytics.cliInvoked({
-                  schemaId: 'N/A',
-                  userId_: installIdOrUserId(),
-                  cliAction: analytics.CliAction.SOURCE,
-                  cliInvokedByCi: invokedByCi()
-                });
+            loadAvoJson().then(json => {
+              analytics.cliInvoked({
+                schemaId: json.schema.id,
+                userId_: installIdOrUserId(),
+                cliAction: analytics.CliAction.SOURCE,
+                cliInvokedByCi: invokedByCi()
               });
+              command(json);
+            });
           }
         })
         .command({
@@ -853,27 +830,15 @@ require('yargs')
                 selectSource(argv.source, json);
               });
             };
-            loadAvoJson()
-              .then(json => {
-                analytics.cliInvoked({
-                  schemaId: json.schema.id,
-                  userId_: installIdOrUserId(),
-                  cliAction: analytics.CliAction.SOURCE_ADD,
-                  cliInvokedByCi: invokedByCi()
-                });
-                command(json);
-              })
-              .catch(err => {
-                if (err instanceof AvoError) {
-                  print(err.message);
-                }
-                analytics.cliInvoked({
-                  schemaId: 'N/A',
-                  userId_: installIdOrUserId(),
-                  cliAction: analytics.CliAction.SOURCE_ADD,
-                  cliInvokedByCi: invokedByCi()
-                });
+            loadAvoJson().then(json => {
+              analytics.cliInvoked({
+                schemaId: json.schema.id,
+                userId_: installIdOrUserId(),
+                cliAction: analytics.CliAction.SOURCE_ADD,
+                cliInvokedByCi: invokedByCi()
               });
+              command(json);
+            });
           }
         })
         .command({
@@ -936,27 +901,15 @@ require('yargs')
                   });
               });
             };
-            loadAvoJson()
-              .then(json => {
-                analytics.cliInvoked({
-                  schemaId: json.schema.id,
-                  userId_: installIdOrUserId(),
-                  cliAction: analytics.CliAction.SOURCE_REMOVE,
-                  cliInvokedByCi: invokedByCi()
-                });
-                command(json);
-              })
-              .catch(err => {
-                if (err instanceof AvoError) {
-                  print(err.message);
-                }
-                analytics.cliInvoked({
-                  schemaId: 'N/A',
-                  userId_: installIdOrUserId(),
-                  cliAction: analytics.CliAction.SOURCE_REMOVE,
-                  cliInvokedByCi: invokedByCi()
-                });
+            loadAvoJson().then(json => {
+              analytics.cliInvoked({
+                schemaId: json.schema.id,
+                userId_: installIdOrUserId(),
+                cliAction: analytics.CliAction.SOURCE_REMOVE,
+                cliInvokedByCi: invokedByCi()
               });
+              command(json);
+            });
           }
         });
     }
@@ -974,27 +927,15 @@ require('yargs')
         opn(url, {wait: false});
       };
 
-      loadAvoJson()
-        .then(json => {
-          analytics.cliInvoked({
-            schemaId: json.schema.id,
-            userId_: installIdOrUserId(),
-            cliAction: analytics.CliAction.EDIT,
-            cliInvokedByCi: invokedByCi()
-          });
-          command(json);
-        })
-        .catch(err => {
-          if (err instanceof AvoError) {
-            print(err.message);
-          }
-          analytics.cliInvoked({
-            schemaId: 'N/A',
-            userId_: installIdOrUserId(),
-            cliAction: analytics.CliAction.EDIT,
-            cliInvokedByCi: invokedByCi()
-          });
+      loadAvoJson().then(json => {
+        analytics.cliInvoked({
+          schemaId: json.schema.id,
+          userId_: installIdOrUserId(),
+          cliAction: analytics.CliAction.EDIT,
+          cliInvokedByCi: invokedByCi()
         });
+        command(json);
+      });
     }
   })
   .command({
@@ -1041,6 +982,8 @@ require('yargs')
           command();
         })
         .catch(() => {
+          // NOTE this catch handler may not be deleted,
+          // we always want to issue the command()
           analytics.cliInvoked({
             schemaId: 'N/A',
             userId_: installIdOrUserId(),
@@ -1090,6 +1033,8 @@ require('yargs')
           command();
         })
         .catch(() => {
+          // NOTE this catch handler may not be deleted,
+          // we always want to issue the command()
           analytics.cliInvoked({
             schemaId: 'N/A',
             userId_: installIdOrUserId(),
@@ -1126,6 +1071,8 @@ require('yargs')
           command();
         })
         .catch(() => {
+          // NOTE this catch handler may not be deleted,
+          // we always want to issue the command()
           analytics.cliInvoked({
             schemaId: 'N/A',
             userId_: installIdOrUserId(),
@@ -1156,10 +1103,6 @@ function file(url) {
 
 function email(email) {
   return underline(email);
-}
-
-function print(message) {
-  process.stderr.write(`${message}\n`);
 }
 
 function cancelWait() {
