@@ -50,7 +50,7 @@ analytics.initAvo(
 );
 
 // register inquirer-file-path
-inquirer.registerPrompt('directory', require('inquirer-select-directory'));
+inquirer.registerPrompt('fuzzypath', require('inquirer-fuzzy-path'));
 
 updateNotifier({pkg: pkg}).notify();
 
@@ -465,10 +465,15 @@ function selectSource(sourceToAdd, json) {
 
       let prompts = [
         {
-          type: 'directory',
+          type: 'fuzzypath',
           name: 'folder',
+          excludePath: path =>
+            path.startsWith('node_modules') || path.startsWith('.git'),
+          itemType: 'directory',
+          rootPath: '',
           message: 'Select a folder to put the library',
-          basePath: '.'
+          default: '',
+          suggestOnly: false
         }
       ];
 
@@ -512,7 +517,7 @@ function selectSource(sourceToAdd, json) {
       return inquirer.prompt(prompts).then(answer => {
         let relativePath = path.relative(
           process.cwd(),
-          path.join(answer.folder, answer.filename)
+          path.join(path.resolve(answer.folder), answer.filename)
         );
         let source;
         if (sourceToAdd) {

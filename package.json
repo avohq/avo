@@ -29,7 +29,7 @@
     "configstore": "4.0.0",
     "http-shutdown": "1.2.0",
     "inquirer": "6.2.0",
-    "inquirer-select-directory": "1.2.0",
+    "inquirer-fuzzy-path": "2.0.2",
     "jsonwebtoken": "8.4.0",
     "load-json-file": "5.1.0",
     "lodash": "4.17.11",
