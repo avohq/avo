@@ -22,7 +22,7 @@
   },
   "files": [
     "cli.js",
-    "analytics.js"
+    "Avo.js"
   ],
   "dependencies": {
     "chalk": "2.4.1",
