@@ -1,3 +1,12 @@
+## [1.1.2](https://github.com/avohq/avo/compare/1.1.1...1.1.2) (2019-02-16)
+
+
+### Bug Fixes
+
+* avo pull source does not pull all sources if it is missing ([80c1048](https://github.com/avohq/avo/commit/80c1048))
+
+
+
 ## [1.1.1](https://github.com/avohq/avo/compare/1.1.0...1.1.1) (2019-02-12)
 
 
