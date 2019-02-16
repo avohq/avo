@@ -803,7 +803,7 @@ require('yargs')
               report.log(`Source ${argv.source} not found`);
               return selectSource(argv.source, json).then(() => {
                 return loadAvoJson().then(json => {
-                  return pull(null, json);
+                  return pull(argv.source, json);
                 });
               });
             } else {
