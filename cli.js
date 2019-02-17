@@ -396,7 +396,8 @@ function codegen(json, result) {
   newJson.sources = newJson.sources.map(source => {
     let target = _.find(targets, target => target.id === source.id);
     if (target) {
-      let updatedSource = {
+      return {
+        ...source,
         actionId: target.actionId,
         name: target.name,
         id: target.id,
@@ -404,7 +405,6 @@ function codegen(json, result) {
         branchId: target.branchId,
         updatedAt: target.updatedAt
       };
-      return updatedSource;
     } else {
       return source;
     }
