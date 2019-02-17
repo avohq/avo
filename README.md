@@ -1,4 +1,4 @@
-![https://www.avo.sh](https://firebasestorage.googleapis.com/v0/b/avo-frontpage.appspot.com/o/logo%2Fassets%2Favo.png?alt=media&token=2acfd7bd-2faf-4787-a450-8f99c407a483)
+![https://www.avo.app](https://firebasestorage.googleapis.com/v0/b/avo-frontpage.appspot.com/o/logo%2Fassets%2Favo.png?alt=media&token=2acfd7bd-2faf-4787-a450-8f99c407a483)
 
 ## Install
 
@@ -32,7 +32,7 @@ Options:
 
 ## Caught a Bug?
 
-Thank you, you are precious to us :hug: Please send an email to friends@avo.sh or file an issue here on GitHub.
+Thank you, you are precious to us :hug: Please send an email to friends@avo.app or file an issue here on GitHub.
 
 ## How to Commit
 
