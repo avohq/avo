@@ -12,16 +12,12 @@
   },
   "sources": [
     {
-      "actionId": "nrNiuzVWUA1vZI135cxR",
+      "actionId": "MMNFWJdxedx3GsOx9Arn",
       "name": "Cli",
       "id": "xOUFa-ew2",
       "path": "Avo.js",
       "branchId": "master",
-      "updatedAt": "2019-02-12T06:22:16.250Z",
-      "analysis": {
-        "searchPath": ".",
-        "module": "Avo"
-      }
+      "updatedAt": "2019-02-17T23:07:52.363Z"
     }
   ]
 }
