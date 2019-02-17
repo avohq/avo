@@ -3,7 +3,6 @@ const _ = require('lodash');
 const {cyan, gray, red, bold, underline} = require('chalk');
 const dateFns = require('date-fns');
 const fs = require('fs');
-const grob = require('grob');
 const http = require('http');
 const inquirer = require('inquirer');
 const jwt = require('jsonwebtoken');
@@ -22,11 +21,13 @@ const updateNotifier = require('update-notifier');
 const url = require('url');
 const util = require('util');
 const uuidv4 = require('uuid/v4');
+const walk = require('ignore-walk');
 const writeFile = require('write');
 const writeJsonFile = require('write-json-file');
 const Configstore = require('configstore');
-const pkg = require('./package.json');
+const Minimatch = require('minimatch').Minimatch;
 
+const pkg = require('./package.json');
 const Avo = require('./Avo.js');
 
 const customAnalyticsDestination = {
@@ -688,6 +689,40 @@ function invokedByCi() {
   return process.env.CI !== undefined;
 }
 
+function findMatches(data, regex) {
+  let isGlobal = regex.global;
+  let lines = data.split('\n');
+  let fileMatches = [];
+  let lastIndex = 0;
+
+  for (let index = 0; index < lines.length; index++) {
+    let lineContents = lines[index];
+    let line = lastIndex + index;
+    let match;
+
+    while (true) {
+      match = regex.exec(lineContents);
+      if (!match) break;
+
+      let start = match.index;
+      let end = match.index + match[0].length;
+
+      fileMatches.push({
+        line,
+        start,
+        end,
+        lineContents
+      });
+
+      if (!isGlobal) break;
+    }
+  }
+
+  lastIndex += lines.length;
+
+  return fileMatches;
+}
+
 require('yargs')
   .usage('$0 command')
   .scriptName('avo')
@@ -750,42 +785,83 @@ require('yargs')
     }
   })
   .command({
-    command: 'status',
+    command: 'status [source]',
     desc: 'Show the status of the Avo project',
     handler: argv => {
       let command = json => {
-        requireAuth(argv, () => {
-          report.info(`On branch '${json.branch.name}'`);
+        // requireAuth(argv, () => {
+        report.info(`On branch '${json.branch.name}'`);
 
-          let sources = Promise.all(
-            json.sources.map(source => {
+        let sources = argv.source
+          ? _.filter(json.sources, source => matchesSource(source, argv.source))
+          : json.sources;
+
+        sources = sources.filter(source => source.analysis !== false);
+
+        let fileCache = walk({
+          ignoreFiles: ['.gitignore'],
+          follow: false
+        }).then(results => {
+          results = results.filter(path => !path.startsWith('.git'));
+          return Promise.all(
+            results.map(path => {
+              return pify(fs.lstat)(path).then(stats => {
+                if (stats.isSymbolicLink()) {
+                  return [];
+                } else {
+                  return pify(fs.readFile)(path, 'utf8').then(data => {
+                    return [path, data];
+                  });
+                }
+              });
+            })
+          ).then(cachePairs => _.fromPairs(cachePairs));
+        });
+
+        fileCache.then(cache => {
+          sources = Promise.all(
+            sources.map(source => {
               return pify(fs.readFile)(source.path, 'utf8').then(data => {
+                let searchFor = 'AVOEVENTMAP:';
                 let lines = data
                   .split('\n')
-                  .filter(line => line.startsWith('///AVOEVENTMAP'));
+                  .filter(line => line.indexOf(searchFor) > -1);
                 if (lines.length === 1) {
-                  let line = lines[0].replace('///AVOEVENTMAP', '');
+                  let line = lines[0].substring(
+                    lines[0].indexOf(searchFor) + searchFor.length
+                  );
+                  line = line.substring(
+                    line.indexOf('['),
+                    line.indexOf(']') + 1
+                  );
                   let eventMap = JSON.parse(line);
+                  let sourcePath = path.parse(source.path);
                   let moduleName = _.get(
                     source,
                     'analysis.module',
-                    path.parse(source.path).name || 'Avo'
+                    sourcePath.name || 'Avo'
                   );
+
+                  let globs = [
+                    new Minimatch(
+                      _.get(source, 'analysis.glob', '**/*' + sourcePath.ext),
+                      {}
+                    ),
+                    new Minimatch('!' + source.path, {})
+                  ];
+
+                  let lookup = _.pickBy(cache, (value, path) =>
+                    _.every(globs, mm => mm.match(path))
+                  );
+
                   return Promise.all(
                     eventMap.map(eventName => {
                       let re = new RegExp(moduleName + '\\.' + eventName);
-                      return grob({
-                        cwd: __dirname,
-                        globs: [
-                          _.get(source, 'analysis.searchPath', '**') +
-                            '/**/*.js',
-                          '!' + source.path,
-                          '!**/node_modules'
-                        ],
-                        regex: re
-                      }).then(result => {
-                        return [eventName, result];
+                      let results = _.flatMap(lookup, (data, path) => {
+                        let results = findMatches(data, re);
+                        return results.length ? [[path, results]] : [];
                       });
+                      return [eventName, _.fromPairs(results)];
                     })
                   ).then(results => {
                     return Object.assign({}, source, {
@@ -807,20 +883,28 @@ require('yargs')
                   name: source.name + ' (' + source.path + ')',
                   children:
                     _.size(source.results) > 1
-                      ? _.map(source.results, (value, eventName) => {
-                          let results = _.fromPairs(Array.from(value));
+                      ? _.map(source.results, (results, eventName) => {
                           return {
                             name: eventName,
-                            children: _.map(results, (result, matchFile) => {
-                              return {
-                                name:
-                                  'found in ' +
-                                  matchFile +
-                                  ': ' +
-                                  result.length +
-                                  (result.length === 1 ? ' time' : ' times')
-                              };
-                            })
+                            children:
+                              _.size(results) > 0
+                                ? _.map(results, (result, matchFile) => {
+                                    return {
+                                      name:
+                                        'used in ' +
+                                        matchFile +
+                                        ': ' +
+                                        result.length +
+                                        (result.length === 1
+                                          ? ' time'
+                                          : ' times')
+                                    };
+                                  })
+                                : [
+                                    {
+                                      name: `${logSymbols.error} no usage found`
+                                    }
+                                  ]
                           };
                         })
                       : [
@@ -832,8 +916,29 @@ require('yargs')
                 };
               })
             );
+
+            let totalEvents = _.sumBy(sources, source =>
+              _.size(source.results)
+            );
+            let missingEvents = _.sumBy(sources, source =>
+              _.sum(
+                _.map(source.results, (results, eventName) =>
+                  _.size(results) > 0 ? 0 : 1
+                )
+              )
+            );
+            console.log();
+            report.log(`Events: ${totalEvents} total`);
+            report.log(`Seen: ${totalEvents - missingEvents} total`);
+            if (missingEvents > 0) {
+              report.log(
+                `${logSymbols.error} ${red('Missing:')} ${missingEvents} total`
+              );
+              process.exit(1);
+            }
           });
         });
+        // });
       };
       loadAvoJson().then(json => {
         Avo.cliInvoked({
@@ -1550,7 +1655,7 @@ process.on('unhandledRejection', err => {
     err = new AvoError(`Promise rejected with value: ${util.inspect(err)}`);
   }
   report.error(err.message);
-  //console.error(err.stack);
+  // console.error(err.stack);
 
   process.exit(1);
 });
