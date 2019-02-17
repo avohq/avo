@@ -1,3 +1,12 @@
+## [1.2.1](https://github.com/avohq/avo/compare/1.2.0...1.2.1) (2019-02-17)
+
+
+### Bug Fixes
+
+* Non-destructive changes to sources json when pulling ([171851e](https://github.com/avohq/avo/commit/171851e))
+
+
+
 # [1.2.0](https://github.com/avohq/avo/compare/1.1.2...1.2.0) (2019-02-17)
 
 
