@@ -17,7 +17,11 @@
       "id": "xOUFa-ew2",
       "path": "Avo.js",
       "branchId": "master",
-      "updatedAt": "2019-02-12T06:22:16.250Z"
+      "updatedAt": "2019-02-12T06:22:16.250Z",
+      "analysis": {
+        "searchPath": ".",
+        "module": "Avo"
+      }
     }
   ]
 }

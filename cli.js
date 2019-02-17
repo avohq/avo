@@ -3,6 +3,7 @@ const _ = require('lodash');
 const {cyan, gray, red, bold, underline} = require('chalk');
 const dateFns = require('date-fns');
 const fs = require('fs');
+const grob = require('grob');
 const http = require('http');
 const inquirer = require('inquirer');
 const jwt = require('jsonwebtoken');
@@ -11,6 +12,7 @@ const logSymbols = require('log-symbols');
 const opn = require('opn');
 const ora = require('ora');
 const path = require('path');
+const pify = require('pify');
 const portfinder = require('portfinder');
 const querystring = require('querystring');
 const request = require('request');
@@ -25,7 +27,7 @@ const writeJsonFile = require('write-json-file');
 const Configstore = require('configstore');
 const pkg = require('./package.json');
 
-const analytics = require('./Avo.js');
+const Avo = require('./Avo.js');
 
 const customAnalyticsDestination = {
   make: function make(production) {
@@ -44,9 +46,9 @@ const customAnalyticsDestination = {
   }
 };
 // setup Avo analytics
-analytics.initAvo(
+Avo.initAvo(
   {env: 'prod'},
-  {client: analytics.Client.CLI, version: pkg.version},
+  {client: Avo.Client.CLI, version: pkg.version},
   customAnalyticsDestination
 );
 
@@ -693,7 +695,7 @@ require('yargs')
     command: 'track-install',
     desc: false,
     handler: () => {
-      analytics.cliInstalled({
+      Avo.cliInstalled({
         userId_: installIdOrUserId(),
         cliInvokedByCi: invokedByCi()
       });
@@ -703,10 +705,10 @@ require('yargs')
     command: 'init',
     desc: 'Initialize an Avo workspace in the current folder',
     handler: argv => {
-      analytics.cliInvoked({
+      Avo.cliInvoked({
         schemaId: 'N/A',
         userId_: installIdOrUserId(),
-        cliAction: analytics.CliAction.INIT,
+        cliAction: Avo.CliAction.INIT,
         cliInvokedByCi: invokedByCi()
       });
       if (fs.existsSync('avo.json')) {
@@ -737,10 +739,10 @@ require('yargs')
         });
       };
       loadAvoJson().then(json => {
-        analytics.cliInvoked({
+        Avo.cliInvoked({
           schemaId: json.schema.id,
           userId_: installIdOrUserId(),
-          cliAction: analytics.CliAction.CHECKOUT,
+          cliAction: Avo.CliAction.CHECKOUT,
           cliInvokedByCi: invokedByCi()
         });
         command(json);
@@ -754,13 +756,90 @@ require('yargs')
       let command = json => {
         requireAuth(argv, () => {
           report.info(`On branch '${json.branch.name}'`);
+
+          let sources = Promise.all(
+            json.sources.map(source => {
+              return pify(fs.readFile)(source.path, 'utf8').then(data => {
+                let lines = data
+                  .split('\n')
+                  .filter(line => line.startsWith('///AVOEVENTMAP'));
+                if (lines.length === 1) {
+                  let line = lines[0].replace('///AVOEVENTMAP', '');
+                  let eventMap = JSON.parse(line);
+                  let moduleName = _.get(
+                    source,
+                    'analysis.module',
+                    path.parse(source.path).name || 'Avo'
+                  );
+                  return Promise.all(
+                    eventMap.map(eventName => {
+                      let re = new RegExp(moduleName + '\\.' + eventName);
+                      return grob({
+                        cwd: __dirname,
+                        globs: [
+                          _.get(source, 'analysis.searchPath', '**') +
+                            '/**/*.js',
+                          '!' + source.path,
+                          '!**/node_modules'
+                        ],
+                        regex: re
+                      }).then(result => {
+                        return [eventName, result];
+                      });
+                    })
+                  ).then(results => {
+                    return Object.assign({}, source, {
+                      results: _.fromPairs(results)
+                    });
+                  });
+                } else {
+                  return source;
+                }
+              });
+            })
+          );
+
+          return sources.then(sources => {
+            report.tree(
+              'sources',
+              sources.map(source => {
+                return {
+                  name: source.name + ' (' + source.path + ')',
+                  children:
+                    _.size(source.results) > 1
+                      ? _.map(source.results, (value, eventName) => {
+                          let results = _.fromPairs(Array.from(value));
+                          return {
+                            name: eventName,
+                            children: _.map(results, (result, matchFile) => {
+                              return {
+                                name:
+                                  'found in ' +
+                                  matchFile +
+                                  ': ' +
+                                  result.length +
+                                  (result.length === 1 ? ' time' : ' times')
+                              };
+                            })
+                          };
+                        })
+                      : [
+                          {
+                            name:
+                              'no usage information found - please run avo pull'
+                          }
+                        ]
+                };
+              })
+            );
+          });
         });
       };
       loadAvoJson().then(json => {
-        analytics.cliInvoked({
+        Avo.cliInvoked({
           schemaId: json.schema.id,
           userId_: installIdOrUserId(),
-          cliAction: analytics.CliAction.STATUS,
+          cliAction: Avo.CliAction.STATUS,
           cliInvokedByCi: invokedByCi()
         });
         command(json);
@@ -779,10 +858,10 @@ require('yargs')
     handler: argv => {
       requireAuth(argv, () => {
         loadAvoJsonOrInit().then(json => {
-          analytics.cliInvoked({
+          Avo.cliInvoked({
             schemaId: json.schema.id,
             userId_: installIdOrUserId(),
-            cliAction: analytics.CliAction.PULL,
+            cliAction: Avo.CliAction.PULL,
             cliInvokedByCi: invokedByCi()
           });
 
@@ -853,10 +932,10 @@ require('yargs')
               });
             };
             loadAvoJson().then(json => {
-              analytics.cliInvoked({
+              Avo.cliInvoked({
                 schemaId: json.schema.id,
                 userId_: installIdOrUserId(),
-                cliAction: analytics.CliAction.SOURCE,
+                cliAction: Avo.CliAction.SOURCE,
                 cliInvokedByCi: invokedByCi()
               });
               command(json);
@@ -873,10 +952,10 @@ require('yargs')
               });
             };
             loadAvoJson().then(json => {
-              analytics.cliInvoked({
+              Avo.cliInvoked({
                 schemaId: json.schema.id,
                 userId_: installIdOrUserId(),
-                cliAction: analytics.CliAction.SOURCE_ADD,
+                cliAction: Avo.CliAction.SOURCE_ADD,
                 cliInvokedByCi: invokedByCi()
               });
               command(json);
@@ -944,10 +1023,10 @@ require('yargs')
               });
             };
             loadAvoJson().then(json => {
-              analytics.cliInvoked({
+              Avo.cliInvoked({
                 schemaId: json.schema.id,
                 userId_: installIdOrUserId(),
-                cliAction: analytics.CliAction.SOURCE_REMOVE,
+                cliAction: Avo.CliAction.SOURCE_REMOVE,
                 cliInvokedByCi: invokedByCi()
               });
               command(json);
@@ -970,10 +1049,10 @@ require('yargs')
       };
 
       loadAvoJson().then(json => {
-        analytics.cliInvoked({
+        Avo.cliInvoked({
           schemaId: json.schema.id,
           userId_: installIdOrUserId(),
-          cliAction: analytics.CliAction.EDIT,
+          cliAction: Avo.CliAction.EDIT,
           cliInvokedByCi: invokedByCi()
         });
         command(json);
@@ -995,7 +1074,7 @@ require('yargs')
             conf.set('user', result.user);
             conf.set('tokens', result.tokens);
 
-            analytics.signedIn({
+            Avo.signedIn({
               userId_: result.user.user_id,
               email: result.user.email,
               cliInvokedByCi: invokedByCi()
@@ -1004,10 +1083,10 @@ require('yargs')
             report.success(`Logged in as ${email(result.user.email)}`);
           })
           .catch(() => {
-            analytics.signInFailed({
+            Avo.signInFailed({
               userId_: conf.get('avo_install_id'),
               emailInput: '', // XXX this is not passed back here
-              signInError: analytics.SignInError.UNKNOWN,
+              signInError: Avo.SignInError.UNKNOWN,
               cliInvokedByCi: invokedByCi()
             });
           });
@@ -1015,10 +1094,10 @@ require('yargs')
 
       loadAvoJson()
         .then(json => {
-          analytics.cliInvoked({
+          Avo.cliInvoked({
             schemaId: json.schema.id,
             userId_: installIdOrUserId(),
-            cliAction: analytics.CliAction.LOGIN,
+            cliAction: Avo.CliAction.LOGIN,
             cliInvokedByCi: invokedByCi()
           });
           command();
@@ -1026,10 +1105,10 @@ require('yargs')
         .catch(() => {
           // NOTE this catch handler may not be deleted,
           // we always want to issue the command()
-          analytics.cliInvoked({
+          Avo.cliInvoked({
             schemaId: 'N/A',
             userId_: installIdOrUserId(),
-            cliAction: analytics.CliAction.LOGIN,
+            cliAction: Avo.CliAction.LOGIN,
             cliInvokedByCi: invokedByCi()
           });
           command();
@@ -1066,10 +1145,10 @@ require('yargs')
 
       loadAvoJson()
         .then(json => {
-          analytics.cliInvoked({
+          Avo.cliInvoked({
             schemaId: json.schema.id,
             userId_: installIdOrUserId(),
-            cliAction: analytics.CliAction.LOGOUT,
+            cliAction: Avo.CliAction.LOGOUT,
             cliInvokedByCi: invokedByCi()
           });
           command();
@@ -1077,10 +1156,10 @@ require('yargs')
         .catch(() => {
           // NOTE this catch handler may not be deleted,
           // we always want to issue the command()
-          analytics.cliInvoked({
+          Avo.cliInvoked({
             schemaId: 'N/A',
             userId_: installIdOrUserId(),
-            cliAction: analytics.CliAction.LOGOUT,
+            cliAction: Avo.CliAction.LOGOUT,
             cliInvokedByCi: invokedByCi()
           });
           command();
@@ -1104,10 +1183,10 @@ require('yargs')
 
       loadAvoJson()
         .then(json => {
-          analytics.cliInvoked({
+          Avo.cliInvoked({
             schemaId: json.schema.id,
             userId_: installIdOrUserId(),
-            cliAction: analytics.CliAction.WHOAMI,
+            cliAction: Avo.CliAction.WHOAMI,
             cliInvokedByCi: invokedByCi()
           });
           command();
@@ -1115,10 +1194,10 @@ require('yargs')
         .catch(() => {
           // NOTE this catch handler may not be deleted,
           // we always want to issue the command()
-          analytics.cliInvoked({
+          Avo.cliInvoked({
             schemaId: 'N/A',
             userId_: installIdOrUserId(),
-            cliAction: analytics.CliAction.WHOAMI,
+            cliAction: Avo.CliAction.WHOAMI,
             cliInvokedByCi: invokedByCi()
           });
           command();
@@ -1471,7 +1550,7 @@ process.on('unhandledRejection', err => {
     err = new AvoError(`Promise rejected with value: ${util.inspect(err)}`);
   }
   report.error(err.message);
-  // console.error(err.stack);
+  //console.error(err.stack);
 
   process.exit(1);
 });
