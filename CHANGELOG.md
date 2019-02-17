@@ -1,3 +1,12 @@
+# [1.2.0](https://github.com/avohq/avo/compare/1.1.2...1.2.0) (2019-02-17)
+
+
+### Features
+
+* avo status with simple linting ([#2](https://github.com/avohq/avo/issues/2)) ([51adb92](https://github.com/avohq/avo/commit/51adb92))
+
+
+
 ## [1.1.2](https://github.com/avohq/avo/compare/1.1.1...1.1.2) (2019-02-16)
 
 
