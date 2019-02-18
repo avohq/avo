@@ -475,7 +475,7 @@ function selectSource(sourceToAdd, json) {
             path.startsWith('node_modules') || path.startsWith('.git'),
           itemType: 'directory',
           rootPath: '',
-          message: 'Select a folder to put the library',
+          message: 'Select a folder to save the analytics wrapper in',
           default: '',
           suggestOnly: false
         }
@@ -489,14 +489,14 @@ function selectSource(sourceToAdd, json) {
         prompts.unshift({
           type: 'list',
           name: 'source',
-          message: 'Select a source to generate a tracking library for',
+          message: 'Select a source to generate a analytics wrapper for',
           choices: choices,
           pageSize: 15
         });
         prompts.push({
           type: 'input',
           name: 'filename',
-          message: 'Select a filename fer the library',
+          message: 'Select a filename fer the analytics wrapper',
           default: function(answers) {
             return answers.source.filenameHint;
           }
