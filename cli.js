@@ -726,6 +726,12 @@ function findMatches(data, regex) {
 require('yargs')
   .usage('$0 command')
   .scriptName('avo')
+  .option('v', {
+    alias: 'verbose',
+    default: false,
+    describe: 'make output more verbose',
+    type: 'boolean'
+  })
   .command({
     command: 'track-install',
     desc: false,
@@ -876,46 +882,50 @@ require('yargs')
           );
 
           return sources.then(sources => {
-            report.tree(
-              'sources',
-              sources.map(source => {
-                return {
-                  name: source.name + ' (' + source.path + ')',
-                  children:
-                    _.size(source.results) > 1
-                      ? _.map(source.results, (results, eventName) => {
-                          return {
-                            name: eventName,
-                            children:
-                              _.size(results) > 0
-                                ? _.map(results, (result, matchFile) => {
-                                    return {
-                                      name:
-                                        'used in ' +
-                                        matchFile +
-                                        ': ' +
-                                        result.length +
-                                        (result.length === 1
-                                          ? ' time'
-                                          : ' times')
-                                    };
-                                  })
-                                : [
-                                    {
-                                      name: `${logSymbols.error} no usage found`
-                                    }
-                                  ]
-                          };
-                        })
-                      : [
-                          {
-                            name:
-                              'no usage information found - please run avo pull'
-                          }
-                        ]
-                };
-              })
-            );
+            if (argv.verbose) {
+              report.tree(
+                'sources',
+                sources.map(source => {
+                  return {
+                    name: source.name + ' (' + source.path + ')',
+                    children:
+                      _.size(source.results) > 1
+                        ? _.map(source.results, (results, eventName) => {
+                            return {
+                              name: eventName,
+                              children:
+                                _.size(results) > 0
+                                  ? _.map(results, (result, matchFile) => {
+                                      return {
+                                        name:
+                                          'used in ' +
+                                          matchFile +
+                                          ': ' +
+                                          result.length +
+                                          (result.length === 1
+                                            ? ' time'
+                                            : ' times')
+                                      };
+                                    })
+                                  : [
+                                      {
+                                        name: `${
+                                          logSymbols.error
+                                        } no usage found`
+                                      }
+                                    ]
+                            };
+                          })
+                        : [
+                            {
+                              name:
+                                'no usage information found - please run avo pull'
+                            }
+                          ]
+                  };
+                })
+              );
+            }
 
             let totalEvents = _.sumBy(sources, source =>
               _.size(source.results)
@@ -927,12 +937,44 @@ require('yargs')
                 )
               )
             );
-            console.log();
-            report.log(`Events: ${totalEvents} total`);
-            report.log(`Seen: ${totalEvents - missingEvents} total`);
+            if (missingEvents === 0) {
+              report.info(`${totalEvents} events seen in code`);
+            } else {
+              report.info(
+                `${totalEvents -
+                  missingEvents} of ${totalEvents} events seen in code`
+              );
+            }
             if (missingEvents > 0) {
-              report.log(
-                `${logSymbols.error} ${red('Missing:')} ${missingEvents} total`
+              report.error(
+                `${missingEvents} missing ${
+                  missingEvents > 1 ? 'events' : 'event'
+                }`
+              );
+              report.tree(
+                'missingEvents',
+                sources.map(source => {
+                  return {
+                    name: source.name + ' (' + source.path + ')',
+                    children:
+                      _.size(source.results) > 1
+                        ? _.flatMap(source.results, (results, eventName) => {
+                            return _.size(results) === 0
+                              ? [
+                                  {
+                                    name: `${red(eventName)}: no usage found`
+                                  }
+                                ]
+                              : [];
+                          })
+                        : [
+                            {
+                              name:
+                                'no usage information found - please run avo pull'
+                            }
+                          ]
+                  };
+                })
               );
               process.exit(1);
             }
