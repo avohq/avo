@@ -422,8 +422,8 @@ function codegen(json, result) {
 
   Promise.all(_.concat([avoJsonTask], sourceTasks)).then(() => {
     report.success(
-      `Tracking ${
-        targets.length > 1 ? 'libraries' : 'library'
+      `Analytics ${
+        targets.length > 1 ? 'wrappers' : 'wrapper'
       } successfully updated`
     );
     targets.forEach(target => {
