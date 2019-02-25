@@ -723,6 +723,35 @@ function findMatches(data, regex) {
   return fileMatches;
 }
 
+function getEventMap(data) {
+  let searchFor = 'AVOEVENTMAP:';
+  let lines = data.split('\n').filter(line => line.indexOf(searchFor) > -1);
+  if (lines.length === 1) {
+    let line = lines[0].substring(
+      lines[0].indexOf(searchFor) + searchFor.length
+    );
+    line = line.substring(line.indexOf('['), line.indexOf(']') + 1);
+    let eventMap = JSON.parse(line);
+    return eventMap;
+  } else {
+    return null;
+  }
+}
+
+function getModuleMap(data) {
+  let searchFor = 'AVOMODULEMAP:';
+  let lines = data.split('\n').filter(line => line.indexOf(searchFor) > -1);
+  if (lines.length === 1) {
+    let line = lines[0].substring(
+      lines[0].indexOf(searchFor) + searchFor.length
+    );
+    let moduleMap = JSON.parse(line);
+    return moduleMap;
+  } else {
+    return null;
+  }
+}
+
 require('yargs')
   .usage('$0 command')
   .scriptName('avo')
@@ -828,24 +857,14 @@ require('yargs')
           sources = Promise.all(
             sources.map(source => {
               return pify(fs.readFile)(source.path, 'utf8').then(data => {
-                let searchFor = 'AVOEVENTMAP:';
-                let lines = data
-                  .split('\n')
-                  .filter(line => line.indexOf(searchFor) > -1);
-                if (lines.length === 1) {
-                  let line = lines[0].substring(
-                    lines[0].indexOf(searchFor) + searchFor.length
-                  );
-                  line = line.substring(
-                    line.indexOf('['),
-                    line.indexOf(']') + 1
-                  );
-                  let eventMap = JSON.parse(line);
+                let eventMap = getEventMap(data);
+                if (eventMap !== null) {
+                  let moduleMap = getModuleMap(data);
                   let sourcePath = path.parse(source.path);
                   let moduleName = _.get(
                     source,
                     'analysis.module',
-                    sourcePath.name || 'Avo'
+                    moduleMap || sourcePath.name || 'Avo'
                   );
 
                   let globs = [
