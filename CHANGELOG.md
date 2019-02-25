@@ -1,3 +1,12 @@
+# [1.3.0](https://github.com/avohq/avo/compare/1.2.4...1.3.0) (2019-02-25)
+
+
+### Features
+
+* Read analytics wrapper module name from source file ([3867652](https://github.com/avohq/avo/commit/3867652))
+
+
+
 ## [1.2.4](https://github.com/avohq/avo/compare/1.2.3...1.2.4) (2019-02-18)
 
 
