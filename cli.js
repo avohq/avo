@@ -745,6 +745,7 @@ function getModuleMap(data) {
     let line = lines[0].substring(
       lines[0].indexOf(searchFor) + searchFor.length
     );
+    line = line.substring(line.indexOf('"'), line.lastIndexOf('"') + 1);
     let moduleMap = JSON.parse(line);
     return moduleMap;
   } else {
