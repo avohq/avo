@@ -396,15 +396,14 @@ function codegen(json, result) {
   newJson.sources = newJson.sources.map(source => {
     let target = _.find(targets, target => target.id === source.id);
     if (target) {
-      return {
-        ...source,
+      return Object.assign({}, source, {
         actionId: target.actionId,
         name: target.name,
         id: target.id,
         path: source.path,
         branchId: target.branchId,
         updatedAt: target.updatedAt
-      };
+      });
     } else {
       return source;
     }
