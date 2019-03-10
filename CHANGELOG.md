@@ -1,3 +1,12 @@
+## [1.3.2](https://github.com/avohq/avo/compare/1.3.1...1.3.2) (2019-03-10)
+
+
+### Bug Fixes
+
+* Use object.assign instead of spread syntax ([1b50034](https://github.com/avohq/avo/commit/1b50034))
+
+
+
 ## [1.3.1](https://github.com/avohq/avo/compare/1.3.0...1.3.1) (2019-02-26)
 
 
