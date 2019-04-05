@@ -1,3 +1,12 @@
+## [1.3.3](https://github.com/avohq/avo/compare/1.3.2...1.3.3) (2019-04-05)
+
+
+### Bug Fixes
+
+* Prevent crash if analytics endpoint fails ([a38e608](https://github.com/avohq/avo/commit/a38e608))
+
+
+
 ## [1.3.2](https://github.com/avohq/avo/compare/1.3.1...1.3.2) (2019-03-10)
 
 
