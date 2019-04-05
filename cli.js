@@ -36,14 +36,18 @@ const customAnalyticsDestination = {
   },
 
   logEvent: function logEvent(userId, eventName, eventProperties) {
-    api.request('POST', '/c/v1/track', {
-      origin: api.apiOrigin,
-      data: {
-        userId: userId,
-        eventName: eventName,
-        eventProperties: eventProperties
-      }
-    });
+    api
+      .request('POST', '/c/v1/track', {
+        origin: api.apiOrigin,
+        data: {
+          userId: userId,
+          eventName: eventName,
+          eventProperties: eventProperties
+        }
+      })
+      .catch(function() {
+        // don't crash on tracking errors
+      });
   }
 };
 // setup Avo analytics
