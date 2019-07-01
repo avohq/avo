@@ -1,3 +1,12 @@
+## [1.3.4](https://github.com/avohq/avo/compare/1.3.3...1.3.4) (2019-07-01)
+
+
+### Bug Fixes
+
+* Fixes issue where switching branch doesn't carry which source is being generated ([f851f0e](https://github.com/avohq/avo/commit/f851f0e))
+
+
+
 ## [1.3.3](https://github.com/avohq/avo/compare/1.3.2...1.3.3) (2019-04-05)
 
 
