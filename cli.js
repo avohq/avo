@@ -54,6 +54,7 @@ const customAnalyticsDestination = {
 Avo.initAvo(
   {env: 'prod'},
   {client: Avo.Client.CLI, version: pkg.version},
+  {},
   customAnalyticsDestination
 );
 
@@ -672,7 +673,7 @@ function pull(sourceFilter, json) {
           )} ago. Pick another branch.`
         );
         checkout(null, json).then(json => {
-          pull(null, json);
+          pull(sourceFilter, json);
         });
       }
     });
