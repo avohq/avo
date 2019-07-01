@@ -1375,7 +1375,8 @@ require('yargs')
         });
     }
   })
-  .demand(1, 'must provide a valid command')
+  .demandCommand(1, 'must provide a valid command')
+  .recommendCommands()
   .help().argv;
 
 /////////////////////////////////////////////////////////////////////////
