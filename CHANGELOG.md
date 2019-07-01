@@ -1,3 +1,12 @@
+## [1.3.5](https://github.com/avohq/avo/compare/1.3.4...1.3.5) (2019-07-01)
+
+
+### Bug Fixes
+
+* Suggest a command if provided command is unknown ([24f9345](https://github.com/avohq/avo/commit/24f9345))
+
+
+
 ## [1.3.4](https://github.com/avohq/avo/compare/1.3.3...1.3.4) (2019-07-01)
 
 
