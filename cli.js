@@ -138,7 +138,6 @@ function _request(options, logOptions) {
           return reject(responseToError(response, body, options));
         }
       }
-
       return resolve({
         status: response.statusCode,
         response: response,
@@ -198,7 +197,8 @@ var api = {
         data: {},
         origin: undefined, // origin must be set
         resolveOnHTTPError: false, // by default, status codes >= 400 leads to reject
-        json: true
+        json: true,
+        gzip: true
       },
       options
     );
@@ -231,6 +231,7 @@ var api = {
     reqOptions.files = options.files;
     reqOptions.resolveOnHTTPError = options.resolveOnHTTPError;
     reqOptions.json = options.json;
+    reqOptions.gzip = options.gzip;
     reqOptions.qs = options.qs;
     reqOptions.headers = options.headers;
     reqOptions.timeout = options.timeout;
