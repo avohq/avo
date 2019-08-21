@@ -1,3 +1,12 @@
+## [1.3.6](https://github.com/avohq/avo/compare/1.3.5...1.3.6) (2019-08-21)
+
+
+### Bug Fixes
+
+* Request and handle gzipped responses ([c108ccf](https://github.com/avohq/avo/commit/c108ccf))
+
+
+
 ## [1.3.5](https://github.com/avohq/avo/compare/1.3.4...1.3.5) (2019-07-01)
 
 
