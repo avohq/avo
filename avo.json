@@ -7,17 +7,17 @@
     "name": "Avo"
   },
   "branch": {
-    "id": "master",
-    "name": "master"
+    "id": "daCzwXaVp",
+    "name": "resolve-conflicts-in-cli"
   },
   "sources": [
     {
-      "actionId": "jee2AprkP9qW3578bIQ2",
+      "actionId": "qsbbHlc4uS5gvKYVLodt",
       "name": "Cli",
       "id": "xOUFa-ew2",
       "path": "Avo.js",
-      "branchId": "master",
-      "updatedAt": "2019-07-01T14:08:41.518Z"
+      "branchId": "daCzwXaVp",
+      "updatedAt": "2019-10-19T18:28:26.576Z"
     }
   ]
 }
