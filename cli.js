@@ -345,6 +345,63 @@ function validateAvoJson(json) {
   return json;
 }
 
+function shouldPullMaster(json) {
+  if (json.branch.id == 'master') {
+    return Promise.resolve(false);
+  } else {
+    wait('Checking if branch is up to date with master');
+    return api
+      .request('POST', '/c/v1/master', {
+        origin: api.apiOrigin,
+        auth: true,
+        data: {
+          schemaId: json.schema.id,
+          branchId: json.branch.id
+        }
+      })
+      .then(res => {
+        cancelWait();
+        let updateRequired = res.body.pullRequired;
+
+        if (updateRequired) {
+          return inquirer
+            .prompt([
+              {
+                type: 'confirm',
+                name: 'pull',
+                default: true,
+                message: `Your branch, ${bold(
+                  json.branch.name
+                )}, is not up to date with Avo master. Would you like to pull latest master changes into the branch?`
+              }
+            ])
+            .then(answer => {
+              if (answer.pull) {
+                wait('Pulling master into branch');
+                return api
+                  .request('POST', '/c/v1/master/pull', {
+                    origin: api.apiOrigin,
+                    auth: true,
+                    data: {
+                      schemaId: json.schema.id,
+                      branchId: json.branch.id
+                    }
+                  })
+                  .then(() => {
+                    cancelWait();
+                    report.success('Successfully pulled master into branch');
+                  });
+              } else {
+                report.info(`Did not pull latest master changes into branch`);
+              }
+            });
+        } else {
+          return Promise.resolve();
+        }
+      });
+  }
+}
+
 function resolveAvoJsonConflicts(err, force) {
   report.info('Resolving Avo merge conflicts');
   return pify(fs.readFile)('avo.json', 'utf8').then(file => {
@@ -382,7 +439,9 @@ function resolveAvoJsonConflicts(err, force) {
         incoming.branch.id == 'master'
       ) {
         report.success('Successfully resolved Avo merge conflicts');
-        return validateAvoJson(nextAvoJson);
+        return shouldPullMaster(nextAvoJson).then(() => {
+          return validateAvoJson(nextAvoJson);
+        });
       } else {
         wait('Checking if incoming Avo branch has been merged');
         return fetchBranches(nextAvoJson).then(branches => {
@@ -400,7 +459,9 @@ function resolveAvoJsonConflicts(err, force) {
                 `https://www.avo.app/schemas/${nextAvoJson.schema.id}/branches/${incoming.branch.id}/diff`
               )}`
             );
-            return validateAvoJson(nextAvoJson);
+            return shouldPullMaster(nextAvoJson).then(() => {
+              return validateAvoJson(nextAvoJson);
+            });
           } else if (isBranchOpen) {
             throw new Error(
               `Incoming branch, ${
@@ -411,7 +472,9 @@ function resolveAvoJsonConflicts(err, force) {
             );
           } else {
             report.success('Successfully resolved Avo merge conflicts');
-            return validateAvoJson(nextAvoJson);
+            return shouldPullMaster(nextAvoJson).then(() => {
+              return validateAvoJson(nextAvoJson);
+            });
           }
         });
       }
