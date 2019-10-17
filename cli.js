@@ -278,6 +278,149 @@ function avoNeedsUpdate(json) {
   );
 }
 
+const MERGE_CONFLICT_ANCESTOR = '|||||||';
+const MERGE_CONFLICT_END = '>>>>>>>';
+const MERGE_CONFLICT_SEP = '=======';
+const MERGE_CONFLICT_START = '<<<<<<<';
+function hasMergeConflicts(str) {
+  return (
+    str.includes(MERGE_CONFLICT_START) &&
+    str.includes(MERGE_CONFLICT_SEP) &&
+    str.includes(MERGE_CONFLICT_END)
+  );
+}
+
+function extractConflictingFiles(str) {
+  const files = [[], []];
+  const lines = str.split(/\r?\n/g);
+  let skip = false;
+
+  while (lines.length) {
+    const line = lines.shift();
+    if (line.startsWith(MERGE_CONFLICT_START)) {
+      while (lines.length) {
+        const conflictLine = lines.shift();
+        if (conflictLine === MERGE_CONFLICT_SEP) {
+          skip = false;
+          break;
+        } else if (skip || conflictLine.startsWith(MERGE_CONFLICT_ANCESTOR)) {
+          skip = true;
+          continue;
+        } else {
+          files[0].push(conflictLine);
+        }
+      }
+
+      while (lines.length) {
+        const conflictLine = lines.shift();
+        if (conflictLine.startsWith(MERGE_CONFLICT_END)) {
+          break;
+        } else {
+          files[1].push(conflictLine);
+        }
+      }
+    } else {
+      files[0].push(line);
+      files[1].push(line);
+    }
+  }
+
+  return [files[0].join('\n'), files[1].join('\n')];
+}
+
+function validateAvoJson(json) {
+  if (avoNeedsUpdate(json)) {
+    throw new AvoError(`Your avo CLI is outdated, please update`);
+  }
+
+  if (isLegacyAvoJson(json)) {
+    return init();
+  }
+
+  // augment the latest major version into avo.json
+  json.avo = Object.assign({}, json.avo || {}, {
+    version: semver.major(pkg.version)
+  });
+
+  return json;
+}
+
+function resolveAvoJsonConflicts(err, force) {
+  report.info('Resolving Avo merge conflicts');
+  return pify(fs.readFile)('avo.json', 'utf8').then(file => {
+    if (hasMergeConflicts(file)) {
+      let files = extractConflictingFiles(file);
+      const head = JSON.parse(files[0]);
+      const incoming = JSON.parse(files[1]);
+
+      if (
+        head.avo.version != incoming.avo.version ||
+        head.schema.id != incoming.schema.id
+      ) {
+        throw new Error(
+          "Could not automatically resolve merge conflicts in avo.json . Resolve merge conflicts in avo.json before running 'avo pull' again."
+        );
+      }
+
+      if (
+        !_.isEqual(head.sources.map(s => s.id), incoming.sources.map(s => s.id))
+      ) {
+        throw new Error(
+          "Could not automatically resolve merge conflicts in avo.json. Resolve merge conflicts in sources list in avo.json before running 'avo pull' again."
+        );
+      }
+
+      const nextAvoJson = {
+        avo: head.avo,
+        schema: head.schema,
+        branch: head.branch,
+        sources: head.sources
+      };
+
+      if (
+        head.branch.id == incoming.branch.id ||
+        incoming.branch.id == 'master'
+      ) {
+        report.success('Successfully resolved Avo merge conflicts');
+        return validateAvoJson(nextAvoJson);
+      } else {
+        wait('Checking if incoming Avo branch has been merged');
+        return fetchBranches(nextAvoJson).then(branches => {
+          cancelWait();
+
+          const isBranchOpen = branches.find(branch => {
+            return branch.id == incoming.branch.id;
+          });
+
+          if (isBranchOpen && force) {
+            report.warn(
+              `Incoming branch, ${
+                incoming.branch.name
+              }, has not been merged to Avo master. To review and merge go to: ${link(
+                `https://www.avo.app/schemas/${nextAvoJson.schema.id}/branches/${incoming.branch.id}/diff`
+              )}`
+            );
+            return validateAvoJson(nextAvoJson);
+          } else if (isBranchOpen) {
+            throw new Error(
+              `Incoming branch, ${
+                incoming.branch.name
+              }, has not been merged to Avo master.\n\nTo review and merge go to:\n${link(
+                `https://www.avo.app/schemas/${nextAvoJson.schema.id}/branches/${incoming.branch.id}/diff`
+              )}\n\nOnce merged, run 'avo pull' again. To skip this check use the --force flag when running 'avo pull'.`
+            );
+          } else {
+            report.success('Successfully resolved Avo merge conflicts');
+            return validateAvoJson(nextAvoJson);
+          }
+        });
+      }
+    } else {
+      throw err;
+    }
+  });
+}
+
 function loadAvoJson() {
   return loadJsonFile('avo.json')
     .then(json => {
@@ -309,29 +452,14 @@ function loadAvoJson() {
     });
 }
 
-function loadAvoJsonOrInit() {
+function loadAvoJsonOrInit(force) {
   return loadJsonFile('avo.json')
-    .then(json => {
-      if (avoNeedsUpdate(json)) {
-        throw new AvoError(`Your avo CLI is outdated, please update`);
-      }
-
-      if (isLegacyAvoJson(json)) {
-        return init();
-      }
-
-      // augment the latest major version into avo.json
-      json.avo = Object.assign({}, json.avo || {}, {
-        version: semver.major(pkg.version)
-      });
-
-      return json;
-    })
+    .then(validateAvoJson)
     .catch(err => {
       if (err.code === 'ENOENT') {
         return init();
       } else {
-        throw err;
+        return resolveAvoJsonConflicts(err, force);
       }
     });
 }
@@ -550,8 +678,7 @@ function selectSource(sourceToAdd, json) {
     });
 }
 
-function checkout(branchToCheckout, json) {
-  wait('Fetching branches');
+function fetchBranches(json) {
   return api
     .request('POST', '/c/v1/branches', {
       origin: api.apiOrigin,
@@ -564,77 +691,81 @@ function checkout(branchToCheckout, json) {
       cancelWait();
       let result = res.body;
       let branches = _.sortBy(result.branches, 'name');
-
-      if (!branchToCheckout) {
-        let choices = branches.map(branch => {
-          return {value: branch, name: branch.name};
-        });
-        let currentBranch = _.find(
-          branches,
-          branch => branch.id == json.branch.id
-        );
-        return inquirer
-          .prompt([
-            {
-              type: 'list',
-              name: 'branch',
-              message: 'Select a branch',
-              default:
-                currentBranch ||
-                _.find(branches, branch => branch.id == 'master'),
-              choices: choices,
-              pageSize: 15
-            }
-          ])
-          .then(answer => {
-            if (answer.branch === currentBranch) {
-              report.info(`Already on '${currentBranch.name}'`);
-              return json;
-            } else {
-              let branch = answer.branch;
-              json = Object.assign({}, json, {
-                branch: {
-                  id: branch.id,
-                  name: branch.name
-                }
-              });
-              return writeJsonFile('avo.json', json, {indent: 2}).then(() => {
-                report.info(`Switched to branch '${branch.name}'`);
-                return json;
-              });
-            }
-          });
-      } else {
-        if (branchToCheckout == json.branch.name) {
-          // XXX should check here if json.branch.id === branch.id from server
-          // if not, it indicates branch delete, same branch re-created and client is out of sync
-          report.info(`Already on '${branchToCheckout}'`);
-          return json;
-        }
-        let branch = _.find(
-          branches,
-          branch => branch.name == branchToCheckout
-        );
-        if (!branch) {
-          throw new AvoError(
-            `Branch '${branchToCheckout}' does not exist. Run ${cmd(
-              'avo branch'
-            )} to list available branches`
-          );
-        } else {
-          json = Object.assign({}, json, {
-            branch: {
-              id: branch.id,
-              name: branch.name
-            }
-          });
-          return writeJsonFile('avo.json', json, {indent: 2}).then(() => {
-            report.info(`Switched to branch '${branch.name}'`);
-            return json;
-          });
-        }
-      }
+      return branches;
     });
+}
+
+function checkout(branchToCheckout, json) {
+  wait('Fetching branches');
+  return fetchBranches(json).then(branches => {
+    cancelWait();
+    if (!branchToCheckout) {
+      let choices = branches.map(branch => {
+        return {value: branch, name: branch.name};
+      });
+      let currentBranch = _.find(
+        branches,
+        branch => branch.id == json.branch.id
+      );
+      return inquirer
+        .prompt([
+          {
+            type: 'list',
+            name: 'branch',
+            message: 'Select a branch',
+            default:
+              currentBranch ||
+              _.find(branches, branch => branch.id == 'master'),
+            choices: choices,
+            pageSize: 15
+          }
+        ])
+        .then(answer => {
+          if (answer.branch === currentBranch) {
+            report.info(`Already on '${currentBranch.name}'`);
+            return json;
+          } else {
+            let branch = answer.branch;
+            json = Object.assign({}, json, {
+              branch: {
+                id: branch.id,
+                name: branch.name
+              }
+            });
+            return writeJsonFile('avo.json', json, {indent: 2}).then(() => {
+              report.info(`Switched to branch '${branch.name}'`);
+              return json;
+            });
+          }
+        });
+    } else {
+      if (branchToCheckout == json.branch.name) {
+        // XXX should check here if json.branch.id === branch.id from server
+        // if not, it indicates branch delete, same branch re-created and client is out of sync
+        report.info(`Already on '${branchToCheckout}'`);
+        return json;
+      }
+      let branch = _.find(branches, branch => branch.name == branchToCheckout);
+      if (!branch) {
+        throw new AvoError(
+          `Branch '${branchToCheckout}' does not exist. Run ${cmd(
+            'avo branch'
+          )} to list available branches`
+        );
+      } else {
+        json = Object.assign({}, json, {
+          branch: {
+            id: branch.id,
+            name: branch.name
+          }
+        });
+        return writeJsonFile('avo.json', json, {indent: 2}).then(() => {
+          report.info(`Switched to branch '${branch.name}'`);
+          return json;
+        });
+      }
+    }
+  });
 }
 
 function matchesSource(source, filter) {
@@ -934,9 +1065,7 @@ require('yargs')
                                     })
                                   : [
                                       {
-                                        name: `${
-                                          logSymbols.error
-                                        } no usage found`
+                                        name: `${logSymbols.error} no usage found`
                                       }
                                     ]
                             };
@@ -1022,14 +1151,19 @@ require('yargs')
     command: 'pull [source]',
     desc: 'Download code from Avo workspace',
     builder: yargs => {
-      return yargs.option('branch', {
-        describe: 'Name of Avo branch to pull from',
-        type: 'string'
-      });
+      return yargs
+        .option('force', {
+          describe: 'Force pull skips incoming branch check.',
+          type: 'boolean'
+        })
+        .option('branch', {
+          describe: 'Name of Avo branch to pull from',
+          type: 'string'
+        });
     },
     handler: argv => {
       requireAuth(argv, () => {
-        loadAvoJsonOrInit().then(json => {
+        loadAvoJsonOrInit(argv.force).then(json => {
           Avo.cliInvoked({
             schemaId: json.schema.id,
             userId_: installIdOrUserId(),
@@ -1164,9 +1298,7 @@ require('yargs')
                       type: 'confirm',
                       name: 'remove',
                       default: true,
-                      message: `Are you sure you want to remove source ${
-                        targetSource.name
-                      } from project`
+                      message: `Are you sure you want to remove source ${targetSource.name} from project`
                     }
                   ])
                   .then(answer => {
@@ -1186,9 +1318,7 @@ require('yargs')
                       });
                     } else {
                       report.info(
-                        `Did not remove source ${
-                          targetSource.name
-                        } from project`
+                        `Did not remove source ${targetSource.name} from project`
                       );
                     }
                   });
