@@ -299,7 +299,7 @@ function _avo_invoke_payload(body) {
 
 _avo_invoke = function _avo_invoke(env, eventId, hash, messages, origin) {
   _avo_invoke_payload({
-    "ac": "mZI1LiVlYBPN3JZtSq9Z",
+    "ac": "qsbbHlc4uS5gvKYVLodt",
     "br": "daCzwXaVp",
     "en": env,
     "ev": eventId,
@@ -315,7 +315,7 @@ _avo_invoke = function _avo_invoke(env, eventId, hash, messages, origin) {
 
 _avo_invoke_meta = function _avo_invoke_meta(env, type, messages, origin) {
   _avo_invoke_payload({
-    "ac": "mZI1LiVlYBPN3JZtSq9Z",
+    "ac": "qsbbHlc4uS5gvKYVLodt",
     "br": "daCzwXaVp",
     "en": env,
     "ty": type,
@@ -364,6 +364,7 @@ _avo_invoke_meta = function _avo_invoke_meta(env, type, messages, origin) {
     SOURCE_ADD: "Source Add",
     SOURCE_REMOVE: "Source Remove",
     MERGE: "Merge",
+    CONFLICT: "Conflict",
   };
 
   function assertSignInError(signInError, label_) {
@@ -442,8 +443,8 @@ _avo_invoke_meta = function _avo_invoke_meta(env, type, messages, origin) {
           "Branch" !== cliAction && "Edit" !== cliAction &&
           "Whoami" !== cliAction && "Source" !== cliAction &&
           "Source Add" !== cliAction && "Source Remove" !== cliAction &&
-          "Merge" !== cliAction) {
-      var message = (label_ ? 'Cli Action' + ': ' + label_ : 'Cli Action') + " should match one of the following values [ Login | Logout | Pull | Checkout | Init | Status | Branch | Edit | Whoami | Source | Source Add | Source Remove | Merge ] but you provided the value " + cliAction
+          "Merge" !== cliAction && "Conflict" !== cliAction) {
+      var message = (label_ ? 'Cli Action' + ': ' + label_ : 'Cli Action') + " should match one of the following values [ Login | Logout | Pull | Checkout | Init | Status | Branch | Edit | Whoami | Source | Source Add | Source Remove | Merge | Conflict ] but you provided the value " + cliAction
       messages = messages.concat([{tag: 'expectedStringMatch', propertyId: "YRq1Pt0ey", message: message}]);
     }
     return messages;
@@ -686,7 +687,7 @@ _avo_invoke_meta = function _avo_invoke_meta(env, type, messages, origin) {
         "cliInvokedByCi"
       ]));
       // debug console in Avo
-      _avo_invoke(__AVO_ENV__, "qqpIQEK11", "a210dc6b296e9c902a3c2ec57b10d289decaf0b146af203e58c8ef3eaa8c123e", messages.map(function(m) { return Object.assign({}, {tag: m.tag, propertyId: m.propertyId, additionalProperties: m.additionalProperties, actualType: m.actualType}); }), 'event');
+      _avo_invoke(__AVO_ENV__, "qqpIQEK11", "6602f9094226f0e7b5f12992dd676d9f613b3eb749d1d5a0f48ea506644b7ed9", messages.map(function(m) { return Object.assign({}, {tag: m.tag, propertyId: m.propertyId, additionalProperties: m.additionalProperties, actualType: m.actualType}); }), 'event');
 
       AvoLogger.logEventSent("Cli Invoked", {
         "Cli Action": properties.cliAction,

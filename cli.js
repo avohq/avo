@@ -428,7 +428,7 @@ function promptPullMaster(json) {
     });
 }
 
-function resolveAvoJsonConflicts(file, {force, skipPull}) {
+function resolveAvoJsonConflicts(file, {force, skipPullMaster}) {
   report.info('Resolving Avo merge conflicts');
   let files = extractConflictingFiles(file);
   const head = JSON.parse(files[0]);
@@ -471,8 +471,8 @@ function resolveAvoJsonConflicts(file, {force, skipPull}) {
       if (isHeadBranchOpen) {
         return Promise.resolve(json);
       } else {
-        report.error(
-          `Your branch '${json.branch.name}' has been closed or merged. Pick another branch.`
+        report.info(
+          `Your current branch '${json.branch.name}' has been closed or merged. Go to another branch:`
         );
         return checkout(null, json);
       }
@@ -512,7 +512,7 @@ function resolveAvoJsonConflicts(file, {force, skipPull}) {
         }
       })
       .then(json => {
-        if (skipPull) {
+        if (skipPullMaster) {
           return Promise.resolve(json);
         } else {
           return promptPullMaster(json);
@@ -539,11 +539,14 @@ function loadAvoJson() {
     });
 }
 
-function loadAvoJsonOrInit({argv, skipPull, skipInit}) {
+function loadAvoJsonOrInit({argv, skipPullMaster, skipInit}) {
   return pify(fs.readFile)('avo.json', 'utf8')
     .then(file => {
       if (hasMergeConflicts(file)) {
-        return resolveAvoJsonConflicts(file, {force: argv.force, skipPull});
+        return resolveAvoJsonConflicts(file, {
+          force: argv.force,
+          skipPullMaster
+        });
       } else {
         return Promise.resolve(JSON.parse(file));
       }
@@ -914,7 +917,7 @@ function pull(sourceFilter, json) {
           )} ago. Pick another branch.`
         );
         checkout(null, json).then(json => {
-          pull(sourceFilter, json);
+          return pull(sourceFilter, json);
         });
       }
     });
@@ -1268,69 +1271,8 @@ require('yargs')
     }
   })
   .command({
-    command: 'checkout [branch]',
-    aliases: ['branch'],
-    desc: 'Switch branches',
-    handler: argv => {
-      return loadAvoJsonOrInit({argv})
-        .then(json => {
-          Avo.cliInvoked({
-            schemaId: json.schema.id,
-            userId_: installIdOrUserId(),
-            cliAction: Avo.CliAction.CHECKOUT,
-            cliInvokedByCi: invokedByCi()
-          });
-          report.info(`Currently on branch '${json.branch.name}'`);
-          requireAuth(argv, () => {
-            return checkout(argv.branch, json).then(writeAvoJson);
-          });
-        })
-        .catch(error => {
-          Avo.cliInvoked({
-            schemaId: 'N/A',
-            userId_: installIdOrUserId(),
-            cliAction: Avo.CliAction.CHECKOUT,
-            cliInvokedByCi: invokedByCi()
-          });
-          throw error;
-        });
-    }
-  })
-  .command({
-    command: 'status [source]',
-    desc: 'Show the status of the Avo implementation',
-    handler: argv => {
-      loadAvoJsonOrInit({argv})
-        .then(json => {
-          Avo.cliInvoked({
-            schemaId: json.schema.id,
-            userId_: installIdOrUserId(),
-            cliAction: Avo.CliAction.STATUS,
-            cliInvokedByCi: invokedByCi()
-          });
-          report.info(`Currently on branch '${json.branch.name}'`);
-          return getSource(argv, json);
-        })
-        .then(([source, json]) => {
-          return writeAvoJson(json).then(json => [source, json]);
-        })
-        .then(([source, json]) => {
-          return status(source, json, argv);
-        })
-        .catch(error => {
-          Avo.cliInvoked({
-            schemaId: 'N/A',
-            userId_: installIdOrUserId(),
-            cliAction: Avo.CliAction.STATUS,
-            cliInvokedByCi: invokedByCi()
-          });
-          throw error;
-        });
-    }
-  })
-  .command({
     command: 'pull [source]',
-    desc: 'Download code from Avo workspace',
+    desc: 'Pull analytics wrappers from Avo workspace',
     builder: yargs => {
       return yargs.option('branch', {
         describe: 'Name of Avo branch to pull from',
@@ -1365,6 +1307,35 @@ require('yargs')
             schemaId: 'N/A',
             userId_: installIdOrUserId(),
             cliAction: Avo.CliAction.PULL,
+            cliInvokedByCi: invokedByCi()
+          });
+          throw error;
+        });
+    }
+  })
+  .command({
+    command: 'checkout [branch]',
+    aliases: ['branch'],
+    desc: 'Switch branches',
+    handler: argv => {
+      return loadAvoJsonOrInit({argv})
+        .then(json => {
+          Avo.cliInvoked({
+            schemaId: json.schema.id,
+            userId_: installIdOrUserId(),
+            cliAction: Avo.CliAction.CHECKOUT,
+            cliInvokedByCi: invokedByCi()
+          });
+          report.info(`Currently on branch '${json.branch.name}'`);
+          requireAuth(argv, () => {
+            return checkout(argv.branch, json).then(writeAvoJson);
+          });
+        })
+        .catch(error => {
+          Avo.cliInvoked({
+            schemaId: 'N/A',
+            userId_: installIdOrUserId(),
+            cliAction: Avo.CliAction.CHECKOUT,
             cliInvokedByCi: invokedByCi()
           });
           throw error;
@@ -1546,10 +1517,43 @@ require('yargs')
     }
   })
   .command({
+    command: 'status [source]',
+    desc: 'Show the status of the Avo implementation',
+    handler: argv => {
+      loadAvoJsonOrInit({argv})
+        .then(json => {
+          Avo.cliInvoked({
+            schemaId: json.schema.id,
+            userId_: installIdOrUserId(),
+            cliAction: Avo.CliAction.STATUS,
+            cliInvokedByCi: invokedByCi()
+          });
+          report.info(`Currently on branch '${json.branch.name}'`);
+          return getSource(argv, json);
+        })
+        .then(([source, json]) => {
+          return writeAvoJson(json).then(json => [source, json]);
+        })
+        .then(([source, json]) => {
+          return status(source, json, argv);
+        })
+        .catch(error => {
+          Avo.cliInvoked({
+            schemaId: 'N/A',
+            userId_: installIdOrUserId(),
+            cliAction: Avo.CliAction.STATUS,
+            cliInvokedByCi: invokedByCi()
+          });
+          throw error;
+        });
+    }
+  })
+
+  .command({
     command: 'merge master',
     desc: 'Merge Avo master branch into your current branch',
     handler: argv => {
-      loadAvoJsonOrInit({argv, skipPull: true})
+      loadAvoJsonOrInit({argv, skipPullMaster: true})
         .then(json => {
           Avo.cliInvoked({
             schemaId: json.schema.id,
@@ -1567,6 +1571,52 @@ require('yargs')
             schemaId: 'N/A',
             userId_: installIdOrUserId(),
             cliAction: Avo.CliAction.MERGE,
+            cliInvokedByCi: invokedByCi()
+          });
+          throw error;
+        });
+    }
+  })
+  .command({
+    command: 'conflict',
+    aliases: ['resolve', 'conflicts'],
+    desc: 'Resolve git conflicts in Avo files',
+    handler: argv => {
+      return pify(fs.readFile)('avo.json', 'utf8')
+        .then(file => {
+          if (hasMergeConflicts(file)) {
+            return requireAuth(argv, () => {
+              return resolveAvoJsonConflicts(file, {
+                force: argv.force
+              }).then(json => {
+                Avo.cliInvoked({
+                  schemaId: json.schema.id,
+                  userId_: installIdOrUserId(),
+                  cliAction: Avo.CliAction.CONFLICT,
+                  cliInvokedByCi: invokedByCi()
+                });
+                pull(null, json);
+              });
+            });
+          } else {
+            report.info(
+              "No git conflicts found in avo.json. Run 'avo pull' to resolve git conflicts in other Avo files."
+            );
+            const json = JSON.parse(file);
+            Avo.cliInvoked({
+              schemaId: json.schema.id,
+              userId_: installIdOrUserId(),
+              cliAction: Avo.CliAction.CONFLICT,
+              cliInvokedByCi: invokedByCi()
+            });
+            return Promise.resolve(json);
+          }
+        })
+        .catch(error => {
+          Avo.cliInvoked({
+            schemaId: 'N/A',
+            userId_: installIdOrUserId(),
+            cliAction: Avo.CliAction.CONFLICT,
             cliInvokedByCi: invokedByCi()
           });
           throw error;
