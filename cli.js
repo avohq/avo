@@ -1551,7 +1551,7 @@ require('yargs')
 
   .command({
     command: 'merge master',
-    desc: 'Merge Avo master branch into your current branch',
+    desc: 'Pull Avo master branch into your current branch',
     handler: argv => {
       loadAvoJsonOrInit({argv, skipPullMaster: true})
         .then(json => {
