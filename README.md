@@ -16,19 +16,25 @@ avo command
 
 Commands:
   avo init               Initialize an Avo workspace in the current folder
-  avo branch             List branches
-  avo checkout [branch]  Switch branches
-  avo pull [source]      Download code from Avo workspace
+  avo pull [source]      Pull analytics wrappers from Avo workspace
+  avo checkout [branch]  Switch branches                               [aliases: branch]
   avo source <command>   Manage sources for the current project
+  avo status [source]    Show the status of the Avo implementation
+  avo merge master       Merge Avo master branch into your current branch
+  avo conflict           Resolve git conflicts in Avo files            [aliases: resolve, conflicts]
   avo edit               Open the Avo workspace in your browser
   avo login              Log into the Avo platform
   avo logout             Log out from the Avo platform
   avo whoami             Shows the currently logged in username
 
 Options:
-  --version  Show version number                                       [boolean]
-  --help     Show help                                                 [boolean]
+  --version      Show version number                                   [boolean]
+  -v, --verbose  make output more verbose                              [boolean] [default: false]
+  -f, --force    Proceed with merge when incoming branch is open       [boolean] [default: false]
+  --help         Show help                                             [boolean]
 ```
+
+For more detailed documentation, visit [https://www.avo.app/docs/commands](https://www.avo.app/docs/commands)
 
 ## Caught a Bug?
 
@@ -45,3 +51,4 @@ yarn commit
 ```
 npm run release-it
 ```
+
