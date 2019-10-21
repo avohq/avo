@@ -1,3 +1,12 @@
+# [1.4.0-beta.2](https://github.com/avohq/avo/compare/1.4.0-beta.1...1.4.0-beta.2) (2019-10-21)
+
+
+### Bug Fixes
+
+* Fix authentication when resolving merge conflicts ([efda141](https://github.com/avohq/avo/commit/efda141))
+
+
+
 # [1.4.0-beta.1](https://github.com/avohq/avo/compare/1.4.0-beta.0...1.4.0-beta.1) (2019-10-21)
 
 
