@@ -434,10 +434,27 @@ function resolveAvoJsonConflicts(file, {argv, skipPullMaster}) {
   const head = JSON.parse(files[0]);
   const incoming = JSON.parse(files[1]);
 
+  Avo.cliConflictResolveAttempted({
+    userId_: installIdOrUserId(),
+    cliInvokedByCi: invokedByCi(),
+    schemaId: head.schema.id,
+    schemaName: head.schema.name,
+    branchId: head.branch.id,
+    branchName: head.branch.name
+  });
+
   if (
     head.avo.version != incoming.avo.version ||
     head.schema.id != incoming.schema.id
   ) {
+    Avo.cliConflictResolveFailed({
+      userId_: installIdOrUserId(),
+      cliInvokedByCi: invokedByCi(),
+      schemaId: head.schema.id,
+      schemaName: head.schema.name,
+      branchId: head.branch.id,
+      branchName: head.branch.name
+    });
     throw new Error(
       "Could not automatically resolve merge conflicts in avo.json. Resolve merge conflicts in avo.json before running 'avo pull' again."
     );
@@ -446,6 +463,14 @@ function resolveAvoJsonConflicts(file, {argv, skipPullMaster}) {
   if (
     !_.isEqual(head.sources.map(s => s.id), incoming.sources.map(s => s.id))
   ) {
+    Avo.cliConflictResolveFailed({
+      userId_: installIdOrUserId(),
+      cliInvokedByCi: invokedByCi(),
+      schemaId: head.schema.id,
+      schemaName: head.schema.name,
+      branchId: head.branch.id,
+      branchName: head.branch.name
+    });
     throw new Error(
       "Could not automatically resolve merge conflicts in avo.json. Resolve merge conflicts in sources list in avo.json before running 'avo pull' again."
     );
@@ -500,6 +525,14 @@ function resolveAvoJsonConflicts(file, {argv, skipPullMaster}) {
             );
             return Promise.resolve(json);
           } else if (!isDone && isIncomingBranchOpen) {
+            Avo.cliConflictResolveFailed({
+              userId_: installIdOrUserId(),
+              cliInvokedByCi: invokedByCi(),
+              schemaId: head.schema.id,
+              schemaName: head.schema.name,
+              branchId: head.branch.id,
+              branchName: head.branch.name
+            });
             throw new Error(
               `Incoming branch, ${
                 incoming.branch.name
@@ -519,6 +552,14 @@ function resolveAvoJsonConflicts(file, {argv, skipPullMaster}) {
           }
         })
         .then(json => {
+          Avo.cliConflictResolveSucceeded({
+            userId_: installIdOrUserId(),
+            cliInvokedByCi: invokedByCi(),
+            schemaId: head.schema.id,
+            schemaName: head.schema.name,
+            branchId: head.branch.id,
+            branchName: head.branch.name
+          });
           report.success('Successfully resolved Avo merge conflicts');
           return validateAvoJson(json);
         });
@@ -1234,6 +1275,9 @@ require('yargs')
           if (json) {
             Avo.cliInvoked({
               schemaId: json.schema.id,
+              schemaName: json.schema.name,
+              branchId: json.branch.id,
+              branchName: json.branch.name,
               userId_: installIdOrUserId(),
               cliAction: Avo.CliAction.INIT,
               cliInvokedByCi: invokedByCi()
@@ -1246,6 +1290,9 @@ require('yargs')
           } else {
             Avo.cliInvoked({
               schemaId: 'N/A',
+              schemaName: 'N/A',
+              branchId: 'N/A',
+              branchName: 'N/A',
               userId_: installIdOrUserId(),
               cliAction: Avo.CliAction.INIT,
               cliInvokedByCi: invokedByCi()
@@ -1264,6 +1311,9 @@ require('yargs')
         .catch(() => {
           Avo.cliInvoked({
             schemaId: 'N/A',
+            schemaName: 'N/A',
+            branchId: 'N/A',
+            branchName: 'N/A',
             userId_: installIdOrUserId(),
             cliAction: Avo.CliAction.INIT,
             cliInvokedByCi: invokedByCi()
@@ -1285,6 +1335,9 @@ require('yargs')
         .then(json => {
           Avo.cliInvoked({
             schemaId: json.schema.id,
+            schemaName: json.schema.name,
+            branchId: json.branch.id,
+            branchName: json.branch.name,
             userId_: installIdOrUserId(),
             cliAction: Avo.CliAction.PULL,
             cliInvokedByCi: invokedByCi()
@@ -1305,6 +1358,9 @@ require('yargs')
         .catch(error => {
           Avo.cliInvoked({
             schemaId: 'N/A',
+            schemaName: 'N/A',
+            branchId: 'N/A',
+            branchName: 'N/A',
             userId_: installIdOrUserId(),
             cliAction: Avo.CliAction.PULL,
             cliInvokedByCi: invokedByCi()
@@ -1322,6 +1378,9 @@ require('yargs')
         .then(json => {
           Avo.cliInvoked({
             schemaId: json.schema.id,
+            schemaName: json.schema.name,
+            branchId: json.branch.id,
+            branchName: json.branch.name,
             userId_: installIdOrUserId(),
             cliAction: Avo.CliAction.CHECKOUT,
             cliInvokedByCi: invokedByCi()
@@ -1334,6 +1393,9 @@ require('yargs')
         .catch(error => {
           Avo.cliInvoked({
             schemaId: 'N/A',
+            schemaName: 'N/A',
+            branchId: 'N/A',
+            branchName: 'N/A',
             userId_: installIdOrUserId(),
             cliAction: Avo.CliAction.CHECKOUT,
             cliInvokedByCi: invokedByCi()
@@ -1355,6 +1417,9 @@ require('yargs')
               .then(json => {
                 Avo.cliInvoked({
                   schemaId: json.schema.id,
+                  schemaName: json.schema.name,
+                  branchId: json.branch.id,
+                  branchName: json.branch.name,
                   userId_: installIdOrUserId(),
                   cliAction: Avo.CliAction.SOURCE,
                   cliInvokedByCi: invokedByCi()
@@ -1383,6 +1448,9 @@ require('yargs')
               .catch(error => {
                 Avo.cliInvoked({
                   schemaId: 'N/A',
+                  schemaName: 'N/A',
+                  branchId: 'N/A',
+                  branchName: 'N/A',
                   userId_: installIdOrUserId(),
                   cliAction: Avo.CliAction.SOURCE,
                   cliInvokedByCi: invokedByCi()
@@ -1399,6 +1467,9 @@ require('yargs')
               .then(json => {
                 Avo.cliInvoked({
                   schemaId: json.schema.id,
+                  schemaName: json.schema.name,
+                  branchId: json.branch.id,
+                  branchName: json.branch.name,
                   userId_: installIdOrUserId(),
                   cliAction: Avo.CliAction.SOURCE_ADD,
                   cliInvokedByCi: invokedByCi()
@@ -1411,6 +1482,9 @@ require('yargs')
               .catch(error => {
                 Avo.cliInvoked({
                   schemaId: 'N/A',
+                  schemaName: 'N/A',
+                  branchId: 'N/A',
+                  branchName: 'N/A',
                   userId_: installIdOrUserId(),
                   cliAction: Avo.CliAction.SOURCE_ADD,
                   cliInvokedByCi: invokedByCi()
@@ -1428,6 +1502,9 @@ require('yargs')
               .then(json => {
                 Avo.cliInvoked({
                   schemaId: json.schema.id,
+                  schemaName: json.schema.name,
+                  branchId: json.branch.id,
+                  branchName: json.branch.name,
                   userId_: installIdOrUserId(),
                   cliAction: Avo.CliAction.SOURCE_REMOVE,
                   cliInvokedByCi: invokedByCi()
@@ -1506,6 +1583,9 @@ require('yargs')
               .catch(error => {
                 Avo.cliInvoked({
                   schemaId: 'N/A',
+                  schemaName: 'N/A',
+                  branchId: 'N/A',
+                  branchName: 'N/A',
                   userId_: installIdOrUserId(),
                   cliAction: Avo.CliAction.SOURCE_REMOVE,
                   cliInvokedByCi: invokedByCi()
@@ -1524,6 +1604,9 @@ require('yargs')
         .then(json => {
           Avo.cliInvoked({
             schemaId: json.schema.id,
+            schemaName: json.schema.name,
+            branchId: json.branch.id,
+            branchName: json.branch.name,
             userId_: installIdOrUserId(),
             cliAction: Avo.CliAction.STATUS,
             cliInvokedByCi: invokedByCi()
@@ -1540,6 +1623,9 @@ require('yargs')
         .catch(error => {
           Avo.cliInvoked({
             schemaId: 'N/A',
+            schemaName: 'N/A',
+            branchId: 'N/A',
+            branchName: 'N/A',
             userId_: installIdOrUserId(),
             cliAction: Avo.CliAction.STATUS,
             cliInvokedByCi: invokedByCi()
@@ -1557,6 +1643,9 @@ require('yargs')
         .then(json => {
           Avo.cliInvoked({
             schemaId: json.schema.id,
+            schemaName: json.schema.name,
+            branchId: json.branch.id,
+            branchName: json.branch.name,
             userId_: installIdOrUserId(),
             cliAction: Avo.CliAction.MERGE,
             cliInvokedByCi: invokedByCi()
@@ -1569,6 +1658,9 @@ require('yargs')
         .catch(error => {
           Avo.cliInvoked({
             schemaId: 'N/A',
+            schemaName: 'N/A',
+            branchId: 'N/A',
+            branchName: 'N/A',
             userId_: installIdOrUserId(),
             cliAction: Avo.CliAction.MERGE,
             cliInvokedByCi: invokedByCi()
@@ -1591,6 +1683,9 @@ require('yargs')
               }).then(json => {
                 Avo.cliInvoked({
                   schemaId: json.schema.id,
+                  schemaName: json.schema.name,
+                  branchId: json.branch.id,
+                  branchName: json.branch.name,
                   userId_: installIdOrUserId(),
                   cliAction: Avo.CliAction.CONFLICT,
                   cliInvokedByCi: invokedByCi()
@@ -1605,6 +1700,9 @@ require('yargs')
             const json = JSON.parse(file);
             Avo.cliInvoked({
               schemaId: json.schema.id,
+              schemaName: json.schema.name,
+              branchId: json.branch.id,
+              branchName: json.branch.name,
               userId_: installIdOrUserId(),
               cliAction: Avo.CliAction.CONFLICT,
               cliInvokedByCi: invokedByCi()
@@ -1615,6 +1713,9 @@ require('yargs')
         .catch(error => {
           Avo.cliInvoked({
             schemaId: 'N/A',
+            schemaName: 'N/A',
+            branchId: 'N/A',
+            branchName: 'N/A',
             userId_: installIdOrUserId(),
             cliAction: Avo.CliAction.CONFLICT,
             cliInvokedByCi: invokedByCi()
@@ -1631,6 +1732,9 @@ require('yargs')
         .then(json => {
           Avo.cliInvoked({
             schemaId: json.schema.id,
+            schemaName: json.schema.name,
+            branchId: json.branch.id,
+            branchName: json.branch.name,
             userId_: installIdOrUserId(),
             cliAction: Avo.CliAction.EDIT,
             cliInvokedByCi: invokedByCi()
@@ -1646,6 +1750,9 @@ require('yargs')
         .catch(error => {
           Avo.cliInvoked({
             schemaId: 'N/A',
+            schemaName: 'N/A',
+            branchId: 'N/A',
+            branchName: 'N/A',
             userId_: installIdOrUserId(),
             cliAction: Avo.CliAction.EDIT,
             cliInvokedByCi: invokedByCi()
@@ -1691,6 +1798,9 @@ require('yargs')
         .then(json => {
           Avo.cliInvoked({
             schemaId: json.schema.id,
+            schemaName: json.schema.name,
+            branchId: json.branch.id,
+            branchName: json.branch.name,
             userId_: installIdOrUserId(),
             cliAction: Avo.CliAction.LOGIN,
             cliInvokedByCi: invokedByCi()
@@ -1700,6 +1810,9 @@ require('yargs')
         .catch(() => {
           Avo.cliInvoked({
             schemaId: 'N/A',
+            schemaName: 'N/A',
+            branchId: 'N/A',
+            branchName: 'N/A',
             userId_: installIdOrUserId(),
             cliAction: Avo.CliAction.LOGIN,
             cliInvokedByCi: invokedByCi()
@@ -1740,6 +1853,9 @@ require('yargs')
         .then(json => {
           Avo.cliInvoked({
             schemaId: json.schema.id,
+            schemaName: json.schema.name,
+            branchId: json.branch.id,
+            branchName: json.branch.name,
             userId_: installIdOrUserId(),
             cliAction: Avo.CliAction.LOGOUT,
             cliInvokedByCi: invokedByCi()
@@ -1749,6 +1865,9 @@ require('yargs')
         .catch(() => {
           Avo.cliInvoked({
             schemaId: 'N/A',
+            schemaName: 'N/A',
+            branchId: 'N/A',
+            branchName: 'N/A',
             userId_: installIdOrUserId(),
             cliAction: Avo.CliAction.LOGOUT,
             cliInvokedByCi: invokedByCi()
@@ -1776,6 +1895,9 @@ require('yargs')
         .then(json => {
           Avo.cliInvoked({
             schemaId: json.schema.id,
+            schemaName: json.schema.name,
+            branchId: json.branch.id,
+            branchName: json.branch.name,
             userId_: installIdOrUserId(),
             cliAction: Avo.CliAction.WHOAMI,
             cliInvokedByCi: invokedByCi()
@@ -1785,6 +1907,9 @@ require('yargs')
         .catch(() => {
           Avo.cliInvoked({
             schemaId: 'N/A',
+            schemaName: 'N/A',
+            branchId: 'N/A',
+            branchName: 'N/A',
             userId_: installIdOrUserId(),
             cliAction: Avo.CliAction.WHOAMI,
             cliInvokedByCi: invokedByCi()
