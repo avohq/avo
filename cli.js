@@ -428,7 +428,7 @@ function promptPullMaster(json) {
     });
 }
 
-function resolveAvoJsonConflicts(file, {force, skipPullMaster}) {
+function resolveAvoJsonConflicts(file, {argv, skipPullMaster}) {
   report.info('Resolving Avo merge conflicts');
   let files = extractConflictingFiles(file);
   const head = JSON.parse(files[0]);
@@ -457,71 +457,72 @@ function resolveAvoJsonConflicts(file, {force, skipPullMaster}) {
     branch: head.branch,
     sources: head.sources
   };
-
-  return fetchBranches(nextAvoJson).then(branches => {
-    const isHeadBranchOpen = branches.find(branch => {
-      return branch.id == nextAvoJson.branch.id;
-    });
-
-    const isIncomingBranchOpen = branches.find(branch => {
-      return branch.id == incoming.branch.id;
-    });
-
-    function switchBranchIfRequired(json) {
-      if (isHeadBranchOpen) {
-        return Promise.resolve(json);
-      } else {
-        report.info(
-          `Your current branch '${json.branch.name}' has been closed or merged. Go to another branch:`
-        );
-        return checkout(null, json);
-      }
-    }
-
-    return switchBranchIfRequired(nextAvoJson)
-      .then(json => {
-        if (
-          head.branch.id == incoming.branch.id ||
-          incoming.branch.id == 'master'
-        ) {
-          return Promise.resolve([true, json]);
-        } else {
-          return Promise.resolve([false, json]);
-        }
-      })
-      .then(([isDone, json]) => {
-        if (!isDone && isIncomingBranchOpen && force) {
-          report.warn(
-            `Incoming branch, ${
-              incoming.branch.name
-            }, has not been merged to Avo master. To review and merge go to: ${link(
-              `https://www.avo.app/schemas/${nextAvoJson.schema.id}/branches/${incoming.branch.id}/diff`
-            )}`
-          );
-          return Promise.resolve(json);
-        } else if (!isDone && isIncomingBranchOpen) {
-          throw new Error(
-            `Incoming branch, ${
-              incoming.branch.name
-            }, has not been merged to Avo master.\n\nTo review and merge go to:\n${link(
-              `https://www.avo.app/schemas/${nextAvoJson.schema.id}/branches/${incoming.branch.id}/diff`
-            )}\n\nOnce merged, run 'avo pull'. To skip this check use the --force flag.`
-          );
-        } else {
-          return Promise.resolve(json);
-        }
-      })
-      .then(json => {
-        if (skipPullMaster) {
-          return Promise.resolve(json);
-        } else {
-          return promptPullMaster(json);
-        }
-      })
-      .then(json => {
-        report.success('Successfully resolved Avo merge conflicts');
-        return validateAvoJson(json);
+  return requireAuth(argv, () => {
+    return fetchBranches(nextAvoJson).then(branches => {
+      const isHeadBranchOpen = branches.find(branch => {
+        return branch.id == nextAvoJson.branch.id;
       });
+
+      const isIncomingBranchOpen = branches.find(branch => {
+        return branch.id == incoming.branch.id;
+      });
+
+      function switchBranchIfRequired(json) {
+        if (isHeadBranchOpen) {
+          return Promise.resolve(json);
+        } else {
+          report.info(
+            `Your current branch '${json.branch.name}' has been closed or merged. Go to another branch:`
+          );
+          return checkout(null, json);
+        }
+      }
+
+      return switchBranchIfRequired(nextAvoJson)
+        .then(json => {
+          if (
+            head.branch.id == incoming.branch.id ||
+            incoming.branch.id == 'master'
+          ) {
+            return Promise.resolve([true, json]);
+          } else {
+            return Promise.resolve([false, json]);
+          }
+        })
+        .then(([isDone, json]) => {
+          if (!isDone && isIncomingBranchOpen && argv.force) {
+            report.warn(
+              `Incoming branch, ${
+                incoming.branch.name
+              }, has not been merged to Avo master. To review and merge go to: ${link(
+                `https://www.avo.app/schemas/${nextAvoJson.schema.id}/branches/${incoming.branch.id}/diff`
+              )}`
+            );
+            return Promise.resolve(json);
+          } else if (!isDone && isIncomingBranchOpen) {
+            throw new Error(
+              `Incoming branch, ${
+                incoming.branch.name
+              }, has not been merged to Avo master.\n\nTo review and merge go to:\n${link(
+                `https://www.avo.app/schemas/${nextAvoJson.schema.id}/branches/${incoming.branch.id}/diff`
+              )}\n\nOnce merged, run 'avo pull'. To skip this check use the --force flag.`
+            );
+          } else {
+            return Promise.resolve(json);
+          }
+        })
+        .then(json => {
+          if (skipPullMaster) {
+            return Promise.resolve(json);
+          } else {
+            return promptPullMaster(json);
+          }
+        })
+        .then(json => {
+          report.success('Successfully resolved Avo merge conflicts');
+          return validateAvoJson(json);
+        });
+    });
   });
 }
 
@@ -544,7 +545,7 @@ function loadAvoJsonOrInit({argv, skipPullMaster, skipInit}) {
     .then(file => {
       if (hasMergeConflicts(file)) {
         return resolveAvoJsonConflicts(file, {
-          force: argv.force,
+          argv,
           skipPullMaster
         });
       } else {
@@ -1288,7 +1289,6 @@ require('yargs')
             cliAction: Avo.CliAction.PULL,
             cliInvokedByCi: invokedByCi()
           });
-
           requireAuth(argv, () => {
             if (argv.branch && json.branch.name !== argv.branch) {
               return checkout(argv.branch, json)
@@ -1587,7 +1587,7 @@ require('yargs')
           if (hasMergeConflicts(file)) {
             return requireAuth(argv, () => {
               return resolveAvoJsonConflicts(file, {
-                force: argv.force
+                argv
               }).then(json => {
                 Avo.cliInvoked({
                   schemaId: json.schema.id,
