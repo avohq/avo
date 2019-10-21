@@ -1,3 +1,12 @@
+# [1.4.0-beta.3](https://github.com/avohq/avo/compare/1.4.0-beta.2...1.4.0-beta.3) (2019-10-21)
+
+
+### Bug Fixes
+
+* Updated analytics for merge conflict resolver ([07b0958](https://github.com/avohq/avo/commit/07b0958))
+
+
+
 # [1.4.0-beta.2](https://github.com/avohq/avo/compare/1.4.0-beta.1...1.4.0-beta.2) (2019-10-21)
 
 
