@@ -1,3 +1,12 @@
+# [1.4.0-beta.0](https://github.com/avohq/avo/compare/1.3.6...1.4.0-beta.0) (2019-10-21)
+
+
+### Features
+
+* Resolve simple merge conflicts in Avo files automatically ([886cc7f](https://github.com/avohq/avo/commit/886cc7f))
+
+
+
 ## [1.3.6](https://github.com/avohq/avo/compare/1.3.5...1.3.6) (2019-08-21)
 
 
