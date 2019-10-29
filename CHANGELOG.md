@@ -1,3 +1,38 @@
+# [1.4.0](https://github.com/avohq/avo/compare/1.4.0-beta.3...1.4.0) (2019-10-29)
+
+
+
+# [1.4.0-beta.3](https://github.com/avohq/avo/compare/1.4.0-beta.2...1.4.0-beta.3) (2019-10-21)
+
+
+### Bug Fixes
+
+* Updated analytics for merge conflict resolver ([07b0958](https://github.com/avohq/avo/commit/07b0958))
+
+
+
+# [1.4.0-beta.2](https://github.com/avohq/avo/compare/1.4.0-beta.1...1.4.0-beta.2) (2019-10-21)
+
+
+### Bug Fixes
+
+* Fix authentication when resolving merge conflicts ([efda141](https://github.com/avohq/avo/commit/efda141))
+
+
+
+# [1.4.0-beta.1](https://github.com/avohq/avo/compare/1.4.0-beta.0...1.4.0-beta.1) (2019-10-21)
+
+
+
+# [1.4.0-beta.0](https://github.com/avohq/avo/compare/1.3.6...1.4.0-beta.0) (2019-10-21)
+
+
+### Features
+
+* Resolve simple merge conflicts in Avo files automatically ([886cc7f](https://github.com/avohq/avo/commit/886cc7f))
+
+
+
 ## [1.3.6](https://github.com/avohq/avo/compare/1.3.5...1.3.6) (2019-08-21)
 
 
