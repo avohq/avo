@@ -1,3 +1,7 @@
+# [1.4.0](https://github.com/avohq/avo/compare/1.4.0-beta.3...1.4.0) (2019-10-29)
+
+
+
 # [1.4.0-beta.3](https://github.com/avohq/avo/compare/1.4.0-beta.2...1.4.0-beta.3) (2019-10-21)
 
 
