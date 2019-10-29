@@ -34,7 +34,7 @@
     "inquirer-fuzzy-path": "2.0.2",
     "jsonwebtoken": "8.4.0",
     "load-json-file": "5.1.0",
-    "lodash": "4.17.11",
+    "lodash": "4.17.13",
     "log-symbols": "2.2.0",
     "minimatch": "3.0.4",
     "opn": "5.4.0",
