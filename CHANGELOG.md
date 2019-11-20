@@ -1,3 +1,12 @@
+## [1.4.1-beta.0](https://github.com/avohq/avo/compare/1.4.0...1.4.1-beta.0) (2019-11-20)
+
+
+### Bug Fixes
+
+* Fix postinstall crash on Windows ([8b13c83](https://github.com/avohq/avo/commit/8b13c83))
+
+
+
 # [1.4.0](https://github.com/avohq/avo/compare/1.4.0-beta.3...1.4.0) (2019-10-29)
 
 
