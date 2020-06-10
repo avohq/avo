@@ -375,14 +375,15 @@ function pullMaster(json) {
     report.info('Your current branch is master');
     return Promise.resolve(json);
   } else {
-    wait('Pulling master into branch');
+    wait(json.force ? 'Force pulling master into branch' : 'Pulling master into branch');
     return api
       .request('POST', '/c/v1/master/pull', {
         origin: api.apiOrigin,
         auth: true,
         data: {
           schemaId: json.schema.id,
-          branchId: json.branch.id
+          branchId: json.branch.id,
+          force: json.force
         }
       })
       .then(() => {
@@ -592,6 +593,10 @@ function loadAvoJsonOrInit({argv, skipPullMaster, skipInit}) {
       } else {
         return Promise.resolve(JSON.parse(file));
       }
+    })
+    .then(json => {
+      json.force = argv.f === true;
+      return Promise.resolve(json);
     })
     .then(validateAvoJson)
     .catch(error => {
@@ -1654,7 +1659,8 @@ require('yargs')
             branchName: json.branch.name,
             userId_: installIdOrUserId(),
             cliAction: Avo.CliAction.MERGE,
-            cliInvokedByCi: invokedByCi()
+            cliInvokedByCi: invokedByCi(),
+            force: json.force
           });
 
           return requireAuth(argv, () => {
