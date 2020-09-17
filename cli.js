@@ -779,14 +779,14 @@ function selectSource(sourceToAdd, json) {
         prompts.unshift({
           type: 'list',
           name: 'source',
-          message: 'Select a source to setup',
+          message: 'Select a source to set up',
           choices: choices,
           pageSize: 15
         });
         prompts.push({
           type: 'input',
           name: 'filename',
-          message: 'Select a filename fer the analytics wrapper',
+          message: 'Select a filename for the analytics wrapper',
           default: function(answers) {
             return answers.source.filenameHint;
           }
@@ -801,7 +801,7 @@ function selectSource(sourceToAdd, json) {
         prompts.push({
           type: 'input',
           name: 'filename',
-          message: 'Select a filename fer the library',
+          message: 'Select a filename for the library',
           default: function(answers) {
             return source.filenameHint;
           }
@@ -830,7 +830,7 @@ function selectSource(sourceToAdd, json) {
         let newJson = Object.assign({}, json, {sources: sources});
         report.info(`Added source ${source.name} to the project`);
         report.info(
-          `Run 'avo pull "${source.name}"' to pull latest analytics wrapper for source`
+          `Run 'avo pull "${source.name}"' to pull the latest analytics wrapper for this source`
         );
         return newJson;
       });
@@ -937,7 +937,7 @@ function pull(sourceFilter, json) {
     .then(status => {
       if (status == BRANCH_NOT_UP_TO_DATE) {
         report.warn(
-          `Your branch '${json.branch.name}' is not up to date with Avo master. To merge latest Avo master into branch run 'avo merge master'.`
+          `Your branch '${json.branch.name}' is not up to date with Avo master. To merge latest Avo master into the branch, run 'avo merge master'.`
         );
       }
       return Promise.resolve();
