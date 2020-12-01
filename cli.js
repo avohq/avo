@@ -26,6 +26,7 @@ const writeFile = require('write');
 const writeJsonFile = require('write-json-file');
 const Configstore = require('configstore');
 const Minimatch = require('minimatch').Minimatch;
+const Inspector = require('node-avo-inspector');
 
 const pkg = require('./package.json');
 const Avo = require('./Avo.js');
@@ -51,9 +52,13 @@ const customAnalyticsDestination = {
   }
 };
 
+let inspector = new Inspector.AvoInspector({
+  apiKey: "3UWtteG9HenZ825cYoYr", env: Inspector.AvoInspectorEnv.Prod, version: "1.0.0", appName: "Avo CLI"
+});
+
 // setup Avo analytics
 Avo.initAvo(
-  {env: 'prod'},
+  {env: 'prod', inspector: inspector},
   {client: Avo.Client.CLI, version: pkg.version},
   {},
   customAnalyticsDestination
