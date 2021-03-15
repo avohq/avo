@@ -895,16 +895,23 @@ function checkout(branchToCheckout, json) {
           }
         });
     } else {
-      if (branchToCheckout == json.branch.name) {
+      if (branchToCheckout == "master") {
+        report.info(
+          `The master branch has been renamed to main. Continuing checkout with main branch...'`
+        );
+      }
+      let adjustedBranchToCheckout =
+        branchToCheckout == "master" ? "main" : branchToCheckout;
+      if (adjustedBranchToCheckout == json.branch.name) {
         // XXX should check here if json.branch.id === branch.id from server
         // if not, it indicates branch delete, same branch re-created and client is out of sync
-        report.info(`Already on '${branchToCheckout}'`);
+        report.info(`Already on '${adjustedBranchToCheckout}'`);
         return json;
       }
-      let branch = _.find(branches, branch => branch.name == branchToCheckout);
+      let branch = _.find(branches, branch => branch.name == adjustedBranchToCheckout);
       if (!branch) {
         report.error(
-          `Branch '${branchToCheckout}' does not exist. Run ${cmd(
+          `Branch '${adjustedBranchToCheckout}' does not exist. Run ${cmd(
             'avo checkout'
           )} to list available branches`
         );
