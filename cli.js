@@ -371,11 +371,11 @@ function getMasterStatus(json) {
 }
 
 function pullMaster(json) {
-  if (json.branch.name == 'master') {
-    report.info('Your current branch is master');
+  if (json.branch.name == 'main') {
+    report.info('Your current branch is main');
     return Promise.resolve(json);
   } else {
-    wait(json.force ? 'Force pulling master into branch' : 'Pulling master into branch');
+    wait(json.force ? 'Force pulling main into branch' : 'Pulling main into branch');
     return api
       .request('POST', '/c/v1/master/pull', {
         origin: api.apiOrigin,
@@ -388,14 +388,14 @@ function pullMaster(json) {
       })
       .then(() => {
         cancelWait();
-        report.success('Branch is up to date with master');
+        report.success('Branch is up to date with main');
         return json;
       });
   }
 }
 
 function promptPullMaster(json) {
-  wait('Check if branch is up to date with master');
+  wait('Check if branch is up to date with main');
   return getMasterStatus(json)
     .then(branchStatus => {
       cancelWait();
@@ -410,7 +410,7 @@ function promptPullMaster(json) {
               default: true,
               message: `Your branch '${bold(
                 json.branch.name
-              )}' is not up to date with the Avo master branch. Would you like to pull master into your branch?`
+              )}' is not up to date with the Avo main branch. Would you like to pull main into your branch?`
             }
           ])
           .then(answer => Promise.resolve([branchStatus, answer]));
@@ -418,12 +418,12 @@ function promptPullMaster(json) {
     })
     .then(([branchStatus, answer]) => {
       if (branchStatus == BRANCH_UP_TO_DATE) {
-        report.success('Branch is up to date with master');
+        report.success('Branch is up to date with main');
         return Promise.resolve(json);
       } else if (answer.pull) {
         return pullMaster(json);
       } else {
-        report.info(`Did not pull master into branch`);
+        report.info(`Did not pull main into branch`);
         return Promise.resolve(json);
       }
     });
@@ -520,7 +520,7 @@ function resolveAvoJsonConflicts(file, {argv, skipPullMaster}) {
             report.warn(
               `Incoming branch, ${
                 incoming.branch.name
-              }, has not been merged to Avo master. To review and merge go to: ${link(
+              }, has not been merged to Avo main. To review and merge go to: ${link(
                 `https://www.avo.app/schemas/${nextAvoJson.schema.id}/branches/${incoming.branch.id}/diff`
               )}`
             );
@@ -537,7 +537,7 @@ function resolveAvoJsonConflicts(file, {argv, skipPullMaster}) {
             throw new Error(
               `Incoming branch, ${
                 incoming.branch.name
-              }, has not been merged to Avo master.\n\nTo review and merge go to:\n${link(
+              }, has not been merged to Avo main.\n\nTo review and merge go to:\n${link(
                 `https://www.avo.app/schemas/${nextAvoJson.schema.id}/branches/${incoming.branch.id}/diff`
               )}\n\nOnce merged, run 'avo pull'. To skip this check use the --force flag.`
             );
@@ -631,7 +631,7 @@ function init() {
       },
       branch: {
         id: 'master',
-        name: 'master'
+        name: 'main'
       }
     };
   };
@@ -937,7 +937,7 @@ function pull(sourceFilter, json) {
     .then(status => {
       if (status == BRANCH_NOT_UP_TO_DATE) {
         report.warn(
-          `Your branch '${json.branch.name}' is not up to date with Avo master. To merge latest Avo master into the branch, run 'avo merge master'.`
+          `Your branch '${json.branch.name}' is not up to date with Avo main. To merge latest Avo main into the branch, run 'avo merge main'.`
         );
       }
       return Promise.resolve();
@@ -1647,8 +1647,9 @@ require('yargs')
   })
 
   .command({
-    command: 'merge master',
-    desc: 'Pull Avo master branch into your current branch',
+    command: 'merge main',
+    aliases: ['merge master'],
+    desc: 'Pull the Avo main branch into your current branch',
     handler: argv => {
       loadAvoJsonOrInit({argv, skipPullMaster: true})
         .then(json => {
