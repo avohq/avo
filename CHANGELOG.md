@@ -1,3 +1,9 @@
+## [1.5.0](https://github.com/avohq/avo/compare/1.4.2...1.5.0) (2021-03-16)
+
+* Rename the master branch to main
+* Update dependencies
+* Faster autocompletion in big projects
+
 ## [1.4.2](https://github.com/avohq/avo/compare/1.4.1...1.4.2) (2020-06-10)
 
 
