@@ -26,6 +26,7 @@ const writeFile = require('write');
 const writeJsonFile = require('write-json-file');
 const Configstore = require('configstore');
 const Minimatch = require('minimatch').Minimatch;
+const Inspector = require('node-avo-inspector');
 
 const pkg = require('./package.json');
 const Avo = require('./Avo.js');
@@ -51,9 +52,13 @@ const customAnalyticsDestination = {
   }
 };
 
+let inspector = new Inspector.AvoInspector({
+  apiKey: "3UWtteG9HenZ825cYoYr", env: Inspector.AvoInspectorEnv.Prod, version: "1.0.0", appName: "Avo CLI"
+});
+
 // setup Avo analytics
 Avo.initAvo(
-  {env: 'prod'},
+  {env: 'prod', inspector: inspector},
   {client: Avo.Client.CLI, version: pkg.version},
   {},
   customAnalyticsDestination
@@ -371,11 +376,11 @@ function getMasterStatus(json) {
 }
 
 function pullMaster(json) {
-  if (json.branch.name == 'master') {
-    report.info('Your current branch is master');
+  if (json.branch.name == 'main') {
+    report.info('Your current branch is main');
     return Promise.resolve(json);
   } else {
-    wait(json.force ? 'Force pulling master into branch' : 'Pulling master into branch');
+    wait(json.force ? 'Force pulling main into branch' : 'Pulling main into branch');
     return api
       .request('POST', '/c/v1/master/pull', {
         origin: api.apiOrigin,
@@ -388,14 +393,14 @@ function pullMaster(json) {
       })
       .then(() => {
         cancelWait();
-        report.success('Branch is up to date with master');
+        report.success('Branch is up to date with main');
         return json;
       });
   }
 }
 
 function promptPullMaster(json) {
-  wait('Check if branch is up to date with master');
+  wait('Check if branch is up to date with main');
   return getMasterStatus(json)
     .then(branchStatus => {
       cancelWait();
@@ -410,7 +415,7 @@ function promptPullMaster(json) {
               default: true,
               message: `Your branch '${bold(
                 json.branch.name
-              )}' is not up to date with the Avo master branch. Would you like to pull master into your branch?`
+              )}' is not up to date with the Avo main branch. Would you like to pull main into your branch?`
             }
           ])
           .then(answer => Promise.resolve([branchStatus, answer]));
@@ -418,12 +423,12 @@ function promptPullMaster(json) {
     })
     .then(([branchStatus, answer]) => {
       if (branchStatus == BRANCH_UP_TO_DATE) {
-        report.success('Branch is up to date with master');
+        report.success('Branch is up to date with main');
         return Promise.resolve(json);
       } else if (answer.pull) {
         return pullMaster(json);
       } else {
-        report.info(`Did not pull master into branch`);
+        report.info(`Did not pull main into branch`);
         return Promise.resolve(json);
       }
     });
@@ -520,7 +525,7 @@ function resolveAvoJsonConflicts(file, {argv, skipPullMaster}) {
             report.warn(
               `Incoming branch, ${
                 incoming.branch.name
-              }, has not been merged to Avo master. To review and merge go to: ${link(
+              }, has not been merged to Avo main. To review and merge go to: ${link(
                 `https://www.avo.app/schemas/${nextAvoJson.schema.id}/branches/${incoming.branch.id}/diff`
               )}`
             );
@@ -537,7 +542,7 @@ function resolveAvoJsonConflicts(file, {argv, skipPullMaster}) {
             throw new Error(
               `Incoming branch, ${
                 incoming.branch.name
-              }, has not been merged to Avo master.\n\nTo review and merge go to:\n${link(
+              }, has not been merged to Avo main.\n\nTo review and merge go to:\n${link(
                 `https://www.avo.app/schemas/${nextAvoJson.schema.id}/branches/${incoming.branch.id}/diff`
               )}\n\nOnce merged, run 'avo pull'. To skip this check use the --force flag.`
             );
@@ -631,7 +636,7 @@ function init() {
       },
       branch: {
         id: 'master',
-        name: 'master'
+        name: 'main'
       }
     };
   };
@@ -780,14 +785,14 @@ function selectSource(sourceToAdd, json) {
         prompts.unshift({
           type: 'list',
           name: 'source',
-          message: 'Select a source to setup',
+          message: 'Select a source to set up',
           choices: choices,
           pageSize: 15
         });
         prompts.push({
           type: 'input',
           name: 'filename',
-          message: 'Select a filename fer the analytics wrapper',
+          message: 'Select a filename for the analytics wrapper',
           default: function(answers) {
             return answers.source.filenameHint;
           }
@@ -802,7 +807,7 @@ function selectSource(sourceToAdd, json) {
         prompts.push({
           type: 'input',
           name: 'filename',
-          message: 'Select a filename fer the library',
+          message: 'Select a filename for the library',
           default: function(answers) {
             return source.filenameHint;
           }
@@ -831,7 +836,7 @@ function selectSource(sourceToAdd, json) {
         let newJson = Object.assign({}, json, {sources: sources});
         report.info(`Added source ${source.name} to the project`);
         report.info(
-          `Run 'avo pull "${source.name}"' to pull latest analytics wrapper for source`
+          `Run 'avo pull "${source.name}"' to pull the latest analytics wrapper for this source`
         );
         return newJson;
       });
@@ -852,6 +857,11 @@ function fetchBranches(json) {
     cancelWait();
     let result = res.body;
     let branches = _.sortBy(result.branches, 'name');
+    // The api still returns master for backwards comparability so we manually
+    // update the branch name to main
+    return branches.map(
+      branch => branch.name === "master" ? {...branch, name: "main"} : branch
+    );
     return branches;
   });
 }
@@ -896,16 +906,23 @@ function checkout(branchToCheckout, json) {
           }
         });
     } else {
-      if (branchToCheckout == json.branch.name) {
+      if (branchToCheckout == "master") {
+        report.info(
+          `The master branch has been renamed to main. Continuing checkout with main branch...'`
+        );
+      }
+      let adjustedBranchToCheckout =
+        branchToCheckout == "master" ? "main" : branchToCheckout;
+      if (adjustedBranchToCheckout == json.branch.name) {
         // XXX should check here if json.branch.id === branch.id from server
         // if not, it indicates branch delete, same branch re-created and client is out of sync
-        report.info(`Already on '${branchToCheckout}'`);
+        report.info(`Already on '${adjustedBranchToCheckout}'`);
         return json;
       }
-      let branch = _.find(branches, branch => branch.name == branchToCheckout);
+      let branch = _.find(branches, branch => branch.name == adjustedBranchToCheckout);
       if (!branch) {
         report.error(
-          `Branch '${branchToCheckout}' does not exist. Run ${cmd(
+          `Branch '${adjustedBranchToCheckout}' does not exist. Run ${cmd(
             'avo checkout'
           )} to list available branches`
         );
@@ -938,7 +955,7 @@ function pull(sourceFilter, json) {
     .then(status => {
       if (status == BRANCH_NOT_UP_TO_DATE) {
         report.warn(
-          `Your branch '${json.branch.name}' is not up to date with Avo master. To merge latest Avo master into branch run 'avo merge master'.`
+          `Your branch '${json.branch.name}' is not up to date with Avo main. To merge latest Avo main into the branch, run 'avo merge main'.`
         );
       }
       return Promise.resolve();
@@ -1648,8 +1665,9 @@ require('yargs')
   })
 
   .command({
-    command: 'merge master',
-    desc: 'Pull Avo master branch into your current branch',
+    command: 'merge main',
+    aliases: ['merge master'],
+    desc: 'Pull the Avo main branch into your current branch',
     handler: argv => {
       loadAvoJsonOrInit({argv, skipPullMaster: true})
         .then(json => {
