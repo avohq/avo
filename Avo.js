@@ -683,7 +683,6 @@ _avo_invoke_meta = function _avo_invoke_meta(env, type, messages, origin) {
    */
   function cliInvoked(properties) {
     properties = properties || {};
-    console.log("cliInvoked")
     if (__AVO_DEV__) {
       // assert properties
       var messages = [];
