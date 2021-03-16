@@ -769,9 +769,9 @@ function selectSource(sourceToAdd, json) {
           excludePath: path =>
             path.startsWith('node_modules') || path.startsWith('.git'),
           itemType: 'directory',
-          rootPath: '',
+          rootPath: '.',
           message: 'Select a folder to save the analytics wrapper in',
-          default: '',
+          default: '.',
           suggestOnly: false,
           depthLimit: 10
         }
