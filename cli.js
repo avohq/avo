@@ -851,6 +851,11 @@ function fetchBranches(json) {
     cancelWait();
     let result = res.body;
     let branches = _.sortBy(result.branches, 'name');
+    // The api still returns master for backwards comparability so we manually
+    // update the branch name to main
+    return branches.map(
+      branch => branch.name === "master" ? {...branch, name: "main"} : branch
+    );
     return branches;
   });
 }
