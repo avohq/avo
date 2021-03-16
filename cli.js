@@ -772,7 +772,8 @@ function selectSource(sourceToAdd, json) {
           rootPath: '',
           message: 'Select a folder to save the analytics wrapper in',
           default: '',
-          suggestOnly: false
+          suggestOnly: false,
+          depthLimit: 10
         }
       ];
 
