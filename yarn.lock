@@ -3366,6 +3366,11 @@ nice-try@^1.0.4:
   resolved "https://registry.yarnpkg.com/nice-try/-/nice-try-1.0.5.tgz#a3378a7696ce7d223e88fc9b764bd7ef1089e366"
   integrity sha512-1nh45deeb5olNY7eX82BkPO7SSxR5SSYJiPTrTdFUVYwAl8CKMA5N9PjTYkHiRjisVcxcQ1HXdLhx2qxxJzLNQ==
 
+node-avo-inspector@^1.0.1:
+  version "1.0.1"
+  resolved "https://registry.yarnpkg.com/node-avo-inspector/-/node-avo-inspector-1.0.1.tgz#7b2cea83e4de9c0ef7591b51c6c9678904b524bf"
+  integrity sha512-xwaoRXU9y5meKthFS9ZXju8Qg/TA1K2xI4cMSN56dgTLcTQtzq57huDrNqqMECUDasdE1qqEeAo3OWP3vUboCw==
+
 node-emoji@^1.6.1:
   version "1.8.1"
   resolved "https://registry.yarnpkg.com/node-emoji/-/node-emoji-1.8.1.tgz#6eec6bfb07421e2148c75c6bba72421f8530a826"

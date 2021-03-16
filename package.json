@@ -37,6 +37,7 @@
     "lodash": "4.17.13",
     "log-symbols": "2.2.0",
     "minimatch": "3.0.4",
+    "node-avo-inspector": "^1.0.1",
     "opn": "5.4.0",
     "ora": "3.0.0",
     "pify": "4.0.1",
