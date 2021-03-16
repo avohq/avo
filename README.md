@@ -20,7 +20,7 @@ Commands:
   avo checkout [branch]  Switch branches                               [aliases: branch]
   avo source <command>   Manage sources for the current project
   avo status [source]    Show the status of the Avo implementation
-  avo merge master       Pull Avo master branch into your current branch
+  avo merge main         Pull the Avo main branch into your current branch
   avo conflict           Resolve git conflicts in Avo files            [aliases: resolve, conflicts]
   avo edit               Open the Avo workspace in your browser
   avo login              Log into the Avo platform
