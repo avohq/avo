@@ -1151,6 +1151,9 @@ function status(source, json, argv) {
                 eventMap.map(eventName => {
                   let re = new RegExp(moduleName + '\\.' + eventName);
                   let results = _.flatMap(lookup, (data, path) => {
+                    if (argv.verbose) {
+                      report.info(`Looking for events in ${path}`);
+                    }
                     let results = findMatches(data, re);
                     return results.length ? [[path, results]] : [];
                   });
@@ -1176,35 +1179,28 @@ function status(source, json, argv) {
               return {
                 name: source.name + ' (' + source.path + ')',
                 children:
-                  _.size(source.results) > 1
-                    ? _.map(source.results, (results, eventName) => {
-                        return {
-                          name: eventName,
-                          children:
-                            _.size(results) > 0
-                              ? _.map(results, (result, matchFile) => {
-                                  return {
-                                    name:
-                                      'used in ' +
-                                      matchFile +
-                                      ': ' +
-                                      result.length +
-                                      (result.length === 1 ? ' time' : ' times')
-                                  };
-                                })
-                              : [
-                                  {
-                                    name: `${logSymbols.error} no usage found`
-                                  }
-                                ]
-                        };
-                      })
-                    : [
-                        {
-                          name:
-                            'no usage information found - please run avo pull'
-                        }
-                      ]
+                   _.map(source.results, (results, eventName) => {
+                      return {
+                        name: eventName,
+                        children:
+                          _.size(results) > 0
+                            ? _.map(results, (result, matchFile) => {
+                                return {
+                                  name:
+                                    'used in ' +
+                                    matchFile +
+                                    ': ' +
+                                    result.length +
+                                    (result.length === 1 ? ' time' : ' times')
+                                };
+                              })
+                            : [
+                                {
+                                  name: `${logSymbols.error} no usage found`
+                                }
+                              ]
+                      };
+                    })
               };
             })
           );
