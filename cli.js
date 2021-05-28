@@ -1219,7 +1219,11 @@ function status(source, json, argv) {
           )
         );
         if (missingEvents === 0) {
-          report.info(`${totalEvents} events seen in code`);
+          if (totalEvents === 0) {
+            report.error('no events found in the avo file - please run avo pull');
+          } else {
+            report.info(`${totalEvents} events seen in code`);
+          }
         } else {
           report.info(
             `${totalEvents -
@@ -1236,8 +1240,7 @@ function status(source, json, argv) {
               return {
                 name: source.name + ' (' + source.path + ')',
                 children:
-                  _.size(source.results) > 1
-                    ? _.flatMap(source.results, (results, eventName) => {
+                    _.flatMap(source.results, (results, eventName) => {
                         return _.size(results) === 0
                           ? [
                               {
@@ -1246,12 +1249,6 @@ function status(source, json, argv) {
                             ]
                           : [];
                       })
-                    : [
-                        {
-                          name:
-                            'no usage information found - please run avo pull'
-                        }
-                      ]
               };
             })
           );
