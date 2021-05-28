@@ -1151,6 +1151,9 @@ function status(source, json, argv) {
                 eventMap.map(eventName => {
                   let re = new RegExp(moduleName + '\\.' + eventName);
                   let results = _.flatMap(lookup, (data, path) => {
+                    if (argv.verbose) {
+                      report.info(`Looking for events in ${path}`);
+                    }
                     let results = findMatches(data, re);
                     return results.length ? [[path, results]] : [];
                   });
@@ -1169,46 +1172,37 @@ function status(source, json, argv) {
       );
 
       return sources.then(sources => {
-        if (argv.verbose) {
-          report.tree(
-            'sources',
-            sources.map(source => {
-              return {
-                name: source.name + ' (' + source.path + ')',
-                children:
-                  _.size(source.results) > 1
-                    ? _.map(source.results, (results, eventName) => {
-                        return {
-                          name: eventName,
-                          children:
-                            _.size(results) > 0
-                              ? _.map(results, (result, matchFile) => {
-                                  return {
-                                    name:
-                                      'used in ' +
-                                      matchFile +
-                                      ': ' +
-                                      result.length +
-                                      (result.length === 1 ? ' time' : ' times')
-                                  };
-                                })
-                              : [
-                                  {
-                                    name: `${logSymbols.error} no usage found`
-                                  }
-                                ]
-                        };
-                      })
-                    : [
-                        {
-                          name:
-                            'no usage information found - please run avo pull'
-                        }
-                      ]
-              };
-            })
-          );
-        }
+        report.tree(
+          'sources',
+          sources.map(source => {
+            return {
+              name: source.name + ' (' + source.path + ')',
+              children:
+                  _.map(source.results, (results, eventName) => {
+                    return {
+                      name: eventName,
+                      children:
+                        _.size(results) > 0
+                          ? _.map(results, (result, matchFile) => {
+                              return {
+                                name:
+                                  'used in ' +
+                                  matchFile +
+                                  ': ' +
+                                  result.length +
+                                  (result.length === 1 ? ' time' : ' times')
+                              };
+                            })
+                          : [
+                              {
+                                name: `${logSymbols.error} no usage found`
+                              }
+                            ]
+                    };
+                  })
+            };
+          })
+        );
 
         let totalEvents = _.sumBy(sources, source => _.size(source.results));
         let missingEvents = _.sumBy(sources, source =>
@@ -1219,7 +1213,11 @@ function status(source, json, argv) {
           )
         );
         if (missingEvents === 0) {
-          report.info(`${totalEvents} events seen in code`);
+          if (totalEvents === 0) {
+            report.error('no events found in the avo file - please run avo pull');
+          } else {
+            report.info(`${totalEvents} events seen in code`);
+          }
         } else {
           report.info(
             `${totalEvents -
@@ -1236,8 +1234,7 @@ function status(source, json, argv) {
               return {
                 name: source.name + ' (' + source.path + ')',
                 children:
-                  _.size(source.results) > 1
-                    ? _.flatMap(source.results, (results, eventName) => {
+                    _.flatMap(source.results, (results, eventName) => {
                         return _.size(results) === 0
                           ? [
                               {
@@ -1246,12 +1243,6 @@ function status(source, json, argv) {
                             ]
                           : [];
                       })
-                    : [
-                        {
-                          name:
-                            'no usage information found - please run avo pull'
-                        }
-                      ]
               };
             })
           );
