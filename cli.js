@@ -1172,39 +1172,37 @@ function status(source, json, argv) {
       );
 
       return sources.then(sources => {
-        if (argv.verbose) {
-          report.tree(
-            'sources',
-            sources.map(source => {
-              return {
-                name: source.name + ' (' + source.path + ')',
-                children:
-                   _.map(source.results, (results, eventName) => {
-                      return {
-                        name: eventName,
-                        children:
-                          _.size(results) > 0
-                            ? _.map(results, (result, matchFile) => {
-                                return {
-                                  name:
-                                    'used in ' +
-                                    matchFile +
-                                    ': ' +
-                                    result.length +
-                                    (result.length === 1 ? ' time' : ' times')
-                                };
-                              })
-                            : [
-                                {
-                                  name: `${logSymbols.error} no usage found`
-                                }
-                              ]
-                      };
-                    })
-              };
-            })
-          );
-        }
+        report.tree(
+          'sources',
+          sources.map(source => {
+            return {
+              name: source.name + ' (' + source.path + ')',
+              children:
+                  _.map(source.results, (results, eventName) => {
+                    return {
+                      name: eventName,
+                      children:
+                        _.size(results) > 0
+                          ? _.map(results, (result, matchFile) => {
+                              return {
+                                name:
+                                  'used in ' +
+                                  matchFile +
+                                  ': ' +
+                                  result.length +
+                                  (result.length === 1 ? ' time' : ' times')
+                              };
+                            })
+                          : [
+                              {
+                                name: `${logSymbols.error} no usage found`
+                              }
+                            ]
+                    };
+                  })
+            };
+          })
+        );
 
         let totalEvents = _.sumBy(sources, source => _.size(source.results));
         let missingEvents = _.sumBy(sources, source =>
