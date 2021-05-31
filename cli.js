@@ -1135,9 +1135,30 @@ function status(source, json, argv) {
                 moduleMap || sourcePath.name || 'Avo'
               );
 
+              let sourcePaths = [];
+
+              if (sourcePath.ext === ".js" || sourcePath.ext === ".ts") {
+                sourcePaths.push("js");
+                sourcePaths.push("jsx");
+                sourcePaths.push("ts");
+                sourcePaths.push("tsx");
+              } else if (sourcePath.ext === ".java" || sourcePath.ext === ".kt") {
+                sourcePaths.push("java");
+                sourcePaths.push("kt");
+              } else if (sourcePath.ext === ".m" || sourcePath.ext === ".swift") {
+                sourcePaths.push("m");
+                sourcePaths.push("swift");
+              } else {
+                sourcePaths.push(sourcePath.ext.substring(1));
+              }
+
+              if (argv.verbose) {
+                console.log("Looking in files with extensions:" , sourcePaths);
+              }
+
               let globs = [
                 new Minimatch(
-                  _.get(source, 'analysis.glob', '**/*' + sourcePath.ext),
+                  _.get(source, 'analysis.glob', '**/*.+(' + sourcePaths.join("|") + ")"),
                   {}
                 ),
                 new Minimatch('!' + source.path, {})
@@ -1149,7 +1170,7 @@ function status(source, json, argv) {
 
               return Promise.all(
                 eventMap.map(eventName => {
-                  let re = new RegExp(moduleName + '\\.' + eventName);
+                  let re = new RegExp('(' + moduleName + '\\.' + eventName + '|\\[' + moduleName + " " + eventName +')');
                   let results = _.flatMap(lookup, (data, path) => {
                     if (argv.verbose) {
                       report.info(`Looking for events in ${path}`);
