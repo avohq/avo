@@ -1135,30 +1135,30 @@ function status(source, json, argv) {
                 moduleMap || sourcePath.name || 'Avo'
               );
 
-              let sourcePaths = [];
+              let sourcePathExts = [];
 
               if (sourcePath.ext === ".js" || sourcePath.ext === ".ts") {
-                sourcePaths.push("js");
-                sourcePaths.push("jsx");
-                sourcePaths.push("ts");
-                sourcePaths.push("tsx");
+                sourcePathExts.push("js");
+                sourcePathExts.push("jsx");
+                sourcePathExts.push("ts");
+                sourcePathExts.push("tsx");
               } else if (sourcePath.ext === ".java" || sourcePath.ext === ".kt") {
-                sourcePaths.push("java");
-                sourcePaths.push("kt");
+                sourcePathExts.push("java");
+                sourcePathExts.push("kt");
               } else if (sourcePath.ext === ".m" || sourcePath.ext === ".swift") {
-                sourcePaths.push("m");
-                sourcePaths.push("swift");
+                sourcePathExts.push("m");
+                sourcePathExts.push("swift");
               } else {
-                sourcePaths.push(sourcePath.ext.substring(1));
+                sourcePathExts.push(sourcePath.ext.substring(1));
               }
 
               if (argv.verbose) {
-                console.log("Looking in files with extensions:" , sourcePaths);
+                console.log("Looking in files with extensions:" , sourcePathExts);
               }
 
               let globs = [
                 new Minimatch(
-                  _.get(source, 'analysis.glob', '**/*.+(' + sourcePaths.join("|") + ")"),
+                  _.get(source, 'analysis.glob', '**/*.+(' + sourcePathExts.join("|") + ")"),
                   {}
                 ),
                 new Minimatch('!' + source.path, {})
