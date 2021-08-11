@@ -685,6 +685,7 @@ function codegen(json, result) {
   let targets = result.sources;
   let newJson = Object.assign({}, _.cloneDeep(json), {schema: schema});
   let warnings = result.warnings;
+  let errors = result.errors;
 
   newJson.sources = newJson.sources.map(source => {
     let target = _.find(targets, target => target.id === source.id);
@@ -711,6 +712,10 @@ function codegen(json, result) {
   let avoJsonTask = writeAvoJson(newJson);
 
   Promise.all(_.concat([avoJsonTask], sourceTasks)).then(() => {
+    if (errors !== undefined && errors !== null && errors !== "") {
+      report.warn(errors + "\n");
+    }
+
     if (warnings !== undefined && warnings !== null && Array.isArray(warnings)) {
       warnings.forEach(warning => {
         report.warn(warning);
@@ -969,11 +974,13 @@ function pull(sourceFilter, json) {
           branchId: json.branch.id,
           sources: _.map(sources, source => {
             return {id: source.id, path: source.path};
-          })
+          }),
+          force: json.force || false
         }
       });
     })
     .then(res => {
+
       cancelWait();
       let result = res.body;
       if (result.ok) {
