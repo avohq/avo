@@ -1663,9 +1663,6 @@ require('yargs')
           return getSource(argv, json);
         })
         .then(([source, json]) => {
-          return writeAvoJson(json).then(json => [source, json]);
-        })
-        .then(([source, json]) => {
           return status(source, json, argv);
         })
         .catch(error => {
