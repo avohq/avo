@@ -24,7 +24,7 @@
   ],
   "dependencies": {
     "chalk": "2.4.1",
-    "configstore": "4.0.0",
+    "configstore": "5.0.1",
     "date-fns": "1.30.1",
     "http-shutdown": "1.2.0",
     "ignore-walk": "3.0.1",
@@ -42,7 +42,7 @@
     "portfinder": "1.0.19",
     "request": "2.88.0",
     "semver": "5.6.0",
-    "update-notifier": "2.5.0",
+    "update-notifier": "5.1.0",
     "uuid": "3.3.2",
     "write": "1.0.3",
     "write-json-file": "3.0.2",
