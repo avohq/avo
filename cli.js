@@ -1,35 +1,42 @@
 #!/usr/bin/env node
-const _ = require('lodash');
-const {cyan, gray, red, bold, underline} = require('chalk');
-const dateFns = require('date-fns');
-const fs = require('fs');
-const http = require('http');
-const inquirer = require('inquirer');
-const jwt = require('jsonwebtoken');
-const loadJsonFile = require('load-json-file');
-const logSymbols = require('log-symbols');
-const opn = require('opn');
-const ora = require('ora');
-const path = require('path');
-const pify = require('pify');
-const portfinder = require('portfinder');
-const querystring = require('querystring');
-const request = require('request');
-const report = require('yurnalist');
-const semver = require('semver');
-const updateNotifier = require('update-notifier');
-const url = require('url');
-const util = require('util');
-const uuidv4 = require('uuid/v4');
-const walk = require('ignore-walk');
-const writeFile = require('write');
-const writeJsonFile = require('write-json-file');
-const Configstore = require('configstore');
-const Minimatch = require('minimatch').Minimatch;
-const Inspector = require('node-avo-inspector');
+import ora from 'ora';
+import chalk from 'chalk'
+import minimatch from 'minimatch';
+import _ from 'lodash';
+import dateFns from 'date-fns';
+import fs from 'fs';
+import http from 'http';
+import inquirer from 'inquirer';
+import jwt from 'jsonwebtoken';
+import loadJsonFile from 'load-json-file';
+import logSymbols from 'log-symbols';
+import opn from 'opn';
+import path from 'path';
+import pify from 'pify';
+import portfinder from 'portfinder';
+import querystring from 'querystring';
+import request from 'request';
+import report from 'yurnalist';
+import semver from 'semver';
+import updateNotifier from 'update-notifier';
+import url from 'url';
+import util from 'util';
+import {v4 as uuidv4} from 'uuid';
+import walk from 'ignore-walk';
+import writeFile from 'write';
+import writeJsonFile from 'write-json-file';
+import Configstore from 'configstore';
+import Inspector from 'node-avo-inspector';
+import yargs from 'yargs';
+import { hideBin } from 'yargs/helpers'
+import httpShutdown from 'http-shutdown';
+import fuzzypath from 'inquirer-fuzzy-path';
 
-const pkg = require('./package.json');
-const Avo = require('./Avo.js');
+import Avo from './Avo.js';
+const pkg = JSON.parse(fs.readFileSync('./package.json'));
+
+const Minimatch = minimatch.Minimatch;
+const {cyan, gray, red, bold, underline} = chalk;
 
 const customAnalyticsDestination = {
   make: function make(production) {
@@ -65,7 +72,7 @@ Avo.initAvo(
 );
 
 // register inquirer-file-path
-inquirer.registerPrompt('fuzzypath', require('inquirer-fuzzy-path'));
+inquirer.registerPrompt('fuzzypath', fuzzypath);
 
 updateNotifier({pkg: pkg}).notify();
 
@@ -121,12 +128,6 @@ function _request(options, logOptions) {
   if (options.qs && !logOptions.skipQueryParams) {
     qsLog = JSON.stringify(options.qs);
   }
-
-  if (!logOptions.skipRequestBody) {
-    bodyLog = options.body || options.form || '';
-  }
-
-  // logger.debug(">>> HTTP REQUEST", options.method, options.url, qsLog, "\n", bodyLog);
 
   return new Promise(function(resolve, reject) {
     var req = request(options, function(err, response, body) {
@@ -1289,7 +1290,7 @@ function status(source, json, argv) {
     });
 }
 
-require('yargs')
+yargs(hideBin(process.argv))
   .usage('$0 command')
   .scriptName('avo')
   .option('v', {
@@ -2144,7 +2145,7 @@ function _loginWithLocalhost(port) {
       _respondWithRedirect(req, res, api.authOrigin + '/auth/cli/error');
     });
 
-    server = require('http-shutdown')(server);
+    server = httpShutdown(server);
 
     server.listen(port, function() {
       report.info(`Visit this URL on any device to login: ${link(authUrl)}`);
