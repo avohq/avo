@@ -415,7 +415,7 @@ function assertOptionalSchemaName(schemaName, label_) {
   return messages;
 }
 
-function assertUserId_(userId_, label_) {
+function _assertUserId_(userId_, label_) {
   var messages = [];
   messages = messages.concat(AvoAssert.assertString("avo-enriched-server-user-id", label_ ? "User Id" + ": " + label_ : "User Id", userId_));
   return messages;
