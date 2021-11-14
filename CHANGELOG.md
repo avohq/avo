@@ -1,3 +1,14 @@
+## [2.0.0]() (2021-11-14)
+
+* Convert package to [pure ESM](https://gist.github.com/sindresorhus/a39789f98801d908bbc7ff3ecc99d99c)
+
+* Update dependencies
+
+
+### Breaking changes
+
+* Minimum required Node version ^12.20.0 || ^14.13.1 || >=16.0.0
+
 ## [1.5.1](https://github.com/avohq/avo/compare/1.5.0...1.5.1) (2021-03-16)
 
 * Fix a bug preventing users from being not able to pick a location for their avo.json file
