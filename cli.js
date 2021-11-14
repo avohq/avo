@@ -705,7 +705,7 @@ function codegen(json, result) {
 
   let sourceTasks = targets.map(target => {
     return Promise.all(
-      target.code.map(code => writeFile.promise(code.path, code.content))
+      target.code.map(code => writeFile(code.path, code.content))
     );
   });
 
