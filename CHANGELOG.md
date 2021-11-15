@@ -1,3 +1,7 @@
+## 1.8.0 (2021-11-11)
+
+* Update dependencies
+
 ## [1.5.1](https://github.com/avohq/avo/compare/1.5.0...1.5.1) (2021-03-16)
 
 * Fix a bug preventing users from being not able to pick a location for their avo.json file
