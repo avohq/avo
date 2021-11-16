@@ -1293,6 +1293,7 @@ function status(source, json, argv) {
 yargs(hideBin(process.argv))
   .usage('$0 command')
   .scriptName('avo')
+  .version(pkg.version)
   .option('v', {
     alias: 'verbose',
     default: false,

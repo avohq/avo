@@ -1,4 +1,4 @@
-## 2.0.1 (2021-11-16)
+## 2.0.2 (2021-11-16)
 
 * Fix a bug causing --version to return incorrect version number
 
