@@ -1,4 +1,8 @@
-## 2.0.0 (2021-11-14)
+## 2.0.1 (2021-11-16)
+
+* Fix a bug causing --version to return incorrect version number
+
+## 2.0.0 (2021-11-16)
 
 * Convert package to [pure ESM](https://gist.github.com/sindresorhus/a39789f98801d908bbc7ff3ecc99d99c)
 * Update dependencies

@@ -33,7 +33,7 @@ import httpShutdown from 'http-shutdown';
 import fuzzypath from 'inquirer-fuzzy-path';
 
 import Avo from './Avo.js';
-const pkg = JSON.parse(fs.readFileSync('./package.json'));
+const pkg = JSON.parse(fs.readFileSync(new URL('package.json', import.meta.url)));
 
 const Minimatch = minimatch.Minimatch;
 const {cyan, gray, red, bold, underline} = chalk;
