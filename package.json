@@ -1,6 +1,7 @@
 {
   "name": "avo",
-  "version": "1.8.0",
+  "version": "2.0.0",
+  "type": "module",
   "description": "The command-line interface for Avo",
   "author": "Avo (https://www.avo.app)",
   "repository": {
@@ -13,7 +14,7 @@
     "avo": "cli.js"
   },
   "engines": {
-    "node": ">=6"
+    "node": "^12.20.0 || ^14.13.1 || >=16.0.0"
   },
   "scripts": {
     "postinstall": "node cli.js track-install"
@@ -37,16 +38,16 @@
     "minimatch": "3.0.4",
     "node-avo-inspector": "^1.0.1",
     "opn": "5.4.0",
-    "ora": "3.0.0",
+    "ora": "6.0.1",
     "pify": "4.0.1",
-    "portfinder": "1.0.19",
+    "portfinder": "1.0.28",
     "request": "2.88.0",
     "semver": "5.6.0",
     "update-notifier": "5.1",
-    "uuid": "3.3.2",
-    "write": "1.0.3",
+    "uuid": "8.3.2",
+    "write": "2.0.0",
     "write-json-file": "3.0.2",
-    "yargs": "17.2",
-    "yurnalist": "2"
+    "yargs": "17.2.1",
+    "yurnalist": "2.1.0"
   }
 }
