@@ -1156,6 +1156,9 @@ function status(source, json, argv) {
               } else if (sourcePath.ext === ".m" || sourcePath.ext === ".swift") {
                 sourcePathExts.push("m");
                 sourcePathExts.push("swift");
+              } else if (sourcePath.ext === ".re") {
+                sourcePathExts.push("re");
+                sourcePathExts.push("res");
               } else {
                 sourcePathExts.push(sourcePath.ext.substring(1));
               }
