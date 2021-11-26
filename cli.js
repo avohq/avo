@@ -1104,7 +1104,7 @@ function getSource(argv, json) {
 
 function status(source, json, argv) {
   let sources = source
-    ? _.filter(json.sources, source => matchesSource(source, source))
+    ? _.filter(json.sources, s => matchesSource(s, source))
     : json.sources;
 
   sources = sources.filter(source => source.analysis !== false);
