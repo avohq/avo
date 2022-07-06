@@ -17,7 +17,8 @@
     "node": ">=14.16"
   },
   "scripts": {
-    "postinstall": "node cli.js track-install"
+    "postinstall": "node cli.js track-install",
+    "lint": "eslint cli.js"
   },
   "files": [
     "cli.js",
@@ -49,5 +50,10 @@
     "write-json-file": "^3.0.2",
     "yargs": "^17.2.1",
     "yurnalist": "^2.1.0"
+  },
+  "devDependencies": {
+    "eslint": "^7.32.0 || ^8.2.0",
+    "eslint-config-airbnb-base": "^15.0.0",
+    "eslint-plugin-import": "^2.25.2"
   }
 }
