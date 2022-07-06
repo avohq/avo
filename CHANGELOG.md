@@ -1,5 +1,9 @@
 ## Unreleased
 
+## 3.0.0 (2022-07-06)
+
+This is mainly a security update and it includes no new or modified functionality. The only breaking change is a requirement for Node >= 14.16. If you are unable to match that, the last version of avo will continue to work.
+
 * Breaking: Replace 'request' with 'got' for better security. Requires Node >= 14.16
 * Bump dependencies to resolve security issues
 * Add a hat to all dependencies for more dependency resolution flexibility
