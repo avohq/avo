@@ -311,7 +311,7 @@ const api = {
     // Runtime fetch of Auth singleton to prevent circular module dependencies
     return api.getAccessToken().then((result) => ({
       ...reqOptions,
-      header: {
+      headers: {
         ...reqOptions.headers,
         'User-Agent': `AvoCLI/${pkg.version}`,
         'X-Client-Version': `AvoCLI/${pkg.version}`,
