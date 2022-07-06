@@ -21,6 +21,7 @@
     ],
     "no-shadow": "warn",
     "no-constant-condition": ["error", { "checkLoops": false }],
-    "no-console": "off"
+    "no-console": "off",
+    "import/no-named-as-default-member": "off"
   }
 }

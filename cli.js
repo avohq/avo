@@ -32,7 +32,7 @@ import { hideBin } from 'yargs/helpers';
 import httpShutdown from 'http-shutdown';
 import fuzzypath from 'inquirer-fuzzy-path';
 
-import * as Avo from './Avo.js';
+import Avo from './Avo.js';
 
 const pkg = JSON.parse(
   fs.readFileSync(new URL('package.json', import.meta.url)),
@@ -1380,13 +1380,9 @@ function status(source, json, argv) {
           })),
         );
 
-        const totalEvents = _.sumBy(sources, ({results}) =>
-          _.size(results),
-        );
-        const missingEvents = _.sumBy(sources, ({results}) =>
-          _.sum(
-            _.map(results, (missing) => (_.size(missing) > 0 ? 0 : 1)),
-          ),
+        const totalEvents = _.sumBy(sources, ({ results }) => _.size(results));
+        const missingEvents = _.sumBy(sources, ({ results }) =>
+          _.sum(_.map(results, (missing) => (_.size(missing) > 0 ? 0 : 1))),
         );
         if (missingEvents === 0) {
           if (totalEvents === 0) {
