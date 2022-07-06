@@ -49,6 +49,7 @@ yarn commit
 ## How to Create a Release
 
 1. Update the semantic version in `package.json`
+2. Add a changelog entry in `CHANGELOG.md`
 2. Publish the package to npm
 
 ```
