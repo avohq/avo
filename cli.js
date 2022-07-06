@@ -41,40 +41,64 @@ const {
   cyan, gray, red, bold, underline,
 } = chalk;
 
-const customAnalyticsDestination = {
-  make: function make(production) {
-    this.production = production;
-  },
 
-  logEvent: function logEvent(userId, eventName, eventProperties) {
-    api
-      .request('POST', '/c/v1/track', {
-        origin: api.apiOrigin,
-        json: {
-          userId,
-          eventName,
-          eventProperties,
-        },
-      })
-      .catch(() => {
-        // don't crash on tracking errors
-      });
-  },
+/// //////////////////////////////////////////////////////////////////////
+// LOGGING
 
-  setUserProperties: () => {}, // noop
+function cmd(command) {
+  return `${gray('`')}${cyan(command)}${gray('`')}`;
+}
+
+function link(text) {
+  return underline(text);
+}
+
+function file(text) {
+  return underline(text);
+}
+
+function email(text) {
+  return underline(text);
+}
+
+// to cancel spinners globally
+let _cancel = null;
+
+let cancelWait = () => {
+  if (_cancel !== null) {
+    _cancel();
+    _cancel = null;
+  }
 };
 
-const inspector = new Inspector.AvoInspector({
-  apiKey: '3UWtteG9HenZ825cYoYr', env: Inspector.AvoInspectorEnv.Prod, version: '1.0.0', appName: 'Avo CLI',
-});
+function wait(message, timeOut = 300) {
+  cancelWait();
+  let running = false;
+  let spinner;
+  let stopped = false;
 
-// setup Avo analytics
-Avo.initAvo(
-  { env: 'prod', inspector },
-  { client: Avo.Client.CLI, version: pkg.version },
-  {},
-  customAnalyticsDestination,
-);
+  setTimeout(() => {
+    if (stopped) return;
+
+    spinner = ora(gray(message));
+    spinner.color = 'gray';
+    spinner.start();
+
+    running = true;
+  }, timeOut);
+
+  const cancel = () => {
+    stopped = true;
+    if (running) {
+      spinner.stop();
+      running = false;
+    }
+    process.removeListener('nowExit', cancel);
+  };
+
+  process.on('nowExit', cancel);
+  cancelWait = cancel;
+}
 
 // register inquirer-file-path
 inquirer.registerPrompt('fuzzypath', fuzzypath);
@@ -89,17 +113,12 @@ if (!conf.has('avo_install_id')) {
 
 const FIFTEEN_MINUTES_IN_MS = 15 * 60 * 1000;
 
-// to cancel spinners globally
-let _cancel = null;
-
 const nonce = _.random(1, 2 << 29).toString();
 
 portfinder.basePort = 9005;
 const _getPort = portfinder.getPortPromise;
 
-function AvoError(message, options) {
-  options = options || {};
-
+function AvoError(message, options = {}) {
   this.name = 'AvoError';
   this.message = message;
   this.children = options.children || [];
@@ -127,6 +146,56 @@ let commandScopes;
 /// //////////////////////////////////////////////////////////////////////
 // REQUEST HANDLING
 
+function responseToError(response) {
+  let { body } = response;
+  if (typeof body === 'string' && response.statusCode === 404) {
+    body = {
+      error: {
+        message: 'Not Found',
+      },
+    };
+  }
+
+  if (response.statusCode < 400) {
+    return null;
+  }
+
+  if (typeof body !== 'object') {
+    try {
+      body = JSON.parse(body);
+    } catch (e) {
+      body = {};
+    }
+  }
+
+  if (!body.error) {
+    body.error = {
+      message: response.statusCode === 404 ? 'Not Found' : 'Unknown Error',
+    };
+  }
+
+  const message = `HTTP Error: ${response.statusCode}, ${body.error.message
+    || body.error}`;
+
+  let exitCode;
+  if (response.statusCode >= 500) {
+    // 5xx errors are unexpected
+    exitCode = 2;
+  } else {
+    // 4xx errors happen sometimes
+    exitCode = 1;
+  }
+
+  _.unset(response, 'request.headers');
+  return new AvoError(message, {
+    context: {
+      body,
+      response,
+    },
+    exit: exitCode,
+  });
+}
+
 function _request(options) {
   return new Promise((resolve, reject) => {
     got(options).json().then((response) => {
@@ -143,15 +212,58 @@ function _request(options) {
   });
 }
 
-const _appendQueryData = function (path, data) {
+const _appendQueryData = (urlPath, data) => {
+  let returnPath = urlPath;
   if (data && _.size(data) > 0) {
-    path += _.includes(path, '?') ? '&' : '?';
-    path += querystring.stringify(data);
+    returnPath += _.includes(returnPath, '?') ? '&' : '?';
+    returnPath += querystring.stringify(data);
   }
-  return path;
+  return returnPath;
 };
 
-var api = {
+function _refreshAccessToken(refreshToken) {
+  return api // eslint-ignore
+    .request('POST', '/auth/refresh', {
+      origin: api.apiOrigin,
+      json: {
+        token: refreshToken,
+      },
+    })
+    .then(
+      (data) => {
+        if (!_.isString(data.idToken)) {
+          throw INVALID_CREDENTIAL_ERROR;
+        }
+        lastAccessToken = _.assign(
+          {
+            expiresAt: Date.now() + data.expiresIn * 1000,
+            refreshToken,
+          },
+          data,
+        );
+
+        const currentRefreshToken = _.get(conf.get('tokens'), 'refreshToken');
+        if (refreshToken === currentRefreshToken) {
+          conf.set('tokens', lastAccessToken);
+        }
+
+        return lastAccessToken;
+      },
+      (err) => {
+        throw INVALID_CREDENTIAL_ERROR;
+      },
+    );
+}
+
+function getAccessToken(refreshToken) {
+  if (_haveValidAccessToken(refreshToken)) {
+    return Promise.resolve(lastAccessToken);
+  }
+
+  return _refreshAccessToken(refreshToken);
+}
+
+const api = {
   authOrigin: 'https://www.avo.app',
 
   apiOrigin: 'https://api.avo.app',
@@ -230,6 +342,41 @@ var api = {
     });
   },
 };
+
+const customAnalyticsDestination = {
+  make: function make(production) {
+    this.production = production;
+  },
+
+  logEvent: function logEvent(userId, eventName, eventProperties) {
+    api
+      .request('POST', '/c/v1/track', {
+        origin: api.apiOrigin,
+        json: {
+          userId,
+          eventName,
+          eventProperties,
+        },
+      })
+      .catch(() => {
+        // don't crash on tracking errors
+      });
+  },
+
+  setUserProperties: () => {}, // noop
+};
+
+const inspector = new Inspector.AvoInspector({
+  apiKey: '3UWtteG9HenZ825cYoYr', env: Inspector.AvoInspectorEnv.Prod, version: '1.0.0', appName: 'Avo CLI',
+});
+
+// setup Avo analytics
+Avo.initAvo(
+  { env: 'prod', inspector },
+  { client: Avo.Client.CLI, version: pkg.version },
+  {},
+  customAnalyticsDestination,
+);
 
 function isLegacyAvoJson(json) {
   // check if legacy avo.json or un-initialized project
@@ -1825,61 +1972,6 @@ yargs(hideBin(process.argv))
   .help().argv;
 
 /// //////////////////////////////////////////////////////////////////////
-// LOGGING
-
-function cmd(command) {
-  return `${gray('`')}${cyan(command)}${gray('`')}`;
-}
-
-function link(url) {
-  return underline(url);
-}
-
-function file(url) {
-  return underline(url);
-}
-
-function email(email) {
-  return underline(email);
-}
-
-function cancelWait() {
-  if (_cancel !== null) {
-    _cancel();
-    _cancel = null;
-  }
-}
-function wait(message, timeOut) {
-  cancelWait();
-  timeOut = timeOut || 300;
-  let running = false;
-  let spinner;
-  let stopped = false;
-
-  setTimeout(() => {
-    if (stopped) return;
-
-    spinner = ora(gray(message));
-    spinner.color = 'gray';
-    spinner.start();
-
-    running = true;
-  }, timeOut);
-
-  const cancel = () => {
-    stopped = true;
-    if (running) {
-      spinner.stop();
-      running = false;
-    }
-    process.removeListener('nowExit', cancel);
-  };
-
-  process.on('nowExit', cancel);
-  cancelWait = cancel;
-}
-
-/// //////////////////////////////////////////////////////////////////////
 // AUTH
 
 function _haveValidAccessToken(refreshToken) {
@@ -1896,48 +1988,6 @@ function _haveValidAccessToken(refreshToken) {
     && _.has(lastAccessToken, 'expiresAt')
     && lastAccessToken.expiresAt > Date.now() + FIFTEEN_MINUTES_IN_MS
   );
-}
-
-function getAccessToken(refreshToken) {
-  if (_haveValidAccessToken(refreshToken)) {
-    return Promise.resolve(lastAccessToken);
-  }
-
-  return _refreshAccessToken(refreshToken);
-}
-
-function _refreshAccessToken(refreshToken) {
-  return api
-    .request('POST', '/auth/refresh', {
-      origin: api.apiOrigin,
-      json: {
-        token: refreshToken,
-      },
-    })
-    .then(
-      (data) => {
-        if (!_.isString(data.idToken)) {
-          throw INVALID_CREDENTIAL_ERROR;
-        }
-        lastAccessToken = _.assign(
-          {
-            expiresAt: Date.now() + data.expiresIn * 1000,
-            refreshToken,
-          },
-          data,
-        );
-
-        const currentRefreshToken = _.get(conf.get('tokens'), 'refreshToken');
-        if (refreshToken === currentRefreshToken) {
-          conf.set('tokens', lastAccessToken);
-        }
-
-        return lastAccessToken;
-      },
-      (err) => {
-        throw INVALID_CREDENTIAL_ERROR;
-      },
-    );
 }
 
 function _getLoginUrl(callbackUrl) {
@@ -2074,57 +2124,6 @@ function logout(refreshToken) {
     conf.delete('user');
     conf.delete('tokens');
   }
-}
-
-function responseToError(response) {
-  let { body } = response;
-  if (typeof body === 'string' && response.statusCode === 404) {
-    body = {
-      error: {
-        message: 'Not Found',
-      },
-    };
-  }
-
-  if (response.statusCode < 400) {
-    return null;
-  }
-
-  if (typeof body !== 'object') {
-    try {
-      body = JSON.parse(body);
-    } catch (e) {
-      body = {};
-    }
-  }
-
-  if (!body.error) {
-    var message = response.statusCode === 404 ? 'Not Found' : 'Unknown Error';
-    body.error = {
-      message,
-    };
-  }
-
-  var message = `HTTP Error: ${response.statusCode}, ${body.error.message
-    || body.error}`;
-
-  let exitCode;
-  if (response.statusCode >= 500) {
-    // 5xx errors are unexpected
-    exitCode = 2;
-  } else {
-    // 4xx errors happen sometimes
-    exitCode = 1;
-  }
-
-  _.unset(response, 'request.headers');
-  return new AvoError(message, {
-    context: {
-      body,
-      response,
-    },
-    exit: exitCode,
-  });
 }
 
 function requireAuth(argv, cb) {
