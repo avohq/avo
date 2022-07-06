@@ -128,9 +128,9 @@ const _getPort = portfinder.getPortPromise;
 function AvoError(message, options = {}) {
   this.name = 'AvoError';
   this.message = message;
-  this.children = options.children || [];
-  this.status = options.status || 500;
-  this.exit = options.exit || 1;
+  this.children = options.children ?? [];
+  this.status = options.status ?? 500;
+  this.exit = options.exit ?? 1;
   this.stack = new Error().stack;
   this.original = options.original;
   this.context = options.context;
@@ -182,7 +182,7 @@ function responseToError(response) {
   }
 
   const message = `HTTP Error: ${response.statusCode}, ${
-    body.error.message || body.error
+    body.error.message ?? body.error
   }`;
 
   let exitCode;
@@ -325,7 +325,7 @@ const api = {
     const reqOptions = {
       method: validMethods.includes(method) ? method : 'GET',
       decompress: true,
-      headers: options.headers || {},
+      headers: options.headers ?? {},
     };
 
     let urlPath = resource;
@@ -406,7 +406,7 @@ Avo.initAvo(
 
 function isLegacyAvoJson(json) {
   // check if legacy avo.json or un-initialized project
-  return json.types || !json.schema;
+  return json.types ?? !json.schema;
 }
 
 function avoNeedsUpdate(json) {
@@ -564,7 +564,7 @@ function requireAuth(argv, cb) {
   const tokens = conf.get('tokens');
   const user = conf.get('user');
 
-  const tokenOpt = argv.token || process.env.AVO_TOKEN;
+  const tokenOpt = argv.token ?? process.env.AVO_TOKEN;
 
   if (tokenOpt) {
     api.setRefreshToken(tokenOpt);
@@ -692,7 +692,7 @@ function checkout(branchToCheckout, json) {
             name: 'branch',
             message: 'Select a branch',
             default:
-              currentBranch || branches.find(({ id }) => id === 'master'),
+              currentBranch ?? branches.find(({ id }) => id === 'master'),
             choices,
             pageSize: 15,
           },
@@ -1012,7 +1012,7 @@ function selectSource(sourceToAdd, json) {
     })
     .then((data) => {
       cancelWait();
-      const existingSources = data.sources || [];
+      const existingSources = data.sources ?? [];
       let sources = data.sources
         .filter(
           (source) =>
@@ -1096,7 +1096,7 @@ function selectSource(sourceToAdd, json) {
             path: relativePath,
           };
         }
-        sources = (json.sources || []).concat([source]);
+        sources = (json.sources ?? []).concat([source]);
         const newJson = { ...json, sources };
         report.info(`Added source ${source.name} to the project`);
         report.info(
@@ -1134,7 +1134,7 @@ function pull(sourceFilter, json) {
             id: source.id,
             path: source.path,
           })),
-          force: json.force || false,
+          force: json.force ?? false,
         },
       }),
     )
@@ -1283,7 +1283,7 @@ function status(source, json, argv) {
               const moduleMap = getModuleMap(data);
               const sourcePath = path.parse(source.path);
               const moduleName =
-                source.analysis.module || moduleMap || sourcePath.name || 'Avo';
+                source.analysis.module ?? moduleMap ?? sourcePath.name ?? 'Avo';
 
               const sourcePathExts = [];
 
@@ -1320,7 +1320,7 @@ function status(source, json, argv) {
 
               const globs = [
                 new Minimatch(
-                  source.analysis.glob || `**/*.+(${sourcePathExts.join('|')})`,
+                  source.analysis.glob ?? `**/*.+(${sourcePathExts.join('|')})`,
                   {},
                 ),
                 new Minimatch(`!${source.path}`, {}),
@@ -1514,7 +1514,7 @@ function _loginWithLocalhost(port) {
 
     let server = http.createServer((req, res) => {
       let tokens;
-      const query = url.parse(req.url, true).query || {};
+      const query = url.parse(req.url, true).query ?? {};
 
       if (query.state === nonce && isString(query.code)) {
         return _getTokensFromAuthorizationCode(query.code, callbackUrl)
@@ -1889,7 +1889,7 @@ yargs(hideBin(process.argv)) // eslint-disable-line no-unused-expressions
                     ])
                     .then((answer) => {
                       if (answer.remove) {
-                        const sources = (json.sources || []).filter(
+                        const sources = (json.sources ?? []).filter(
                           (source) => source.id !== targetSource.id,
                         );
                         const newJson = { ...json, sources };
