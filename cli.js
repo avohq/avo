@@ -609,7 +609,7 @@ function init() {
     .then(({ workspaces }) => {
       cancelWait();
       const schemas = [...workspaces].sort(
-        ([a, b]) => a.lastUsedAt - b.lastUsedAt,
+        (a, b) => a.lastUsedAt - b.lastUsedAt,
       );
       if (schemas.length > 1) {
         const choices = schemas.map((schema) => ({
@@ -664,7 +664,7 @@ function fetchBranches(json) {
   };
   return api.request('POST', '/c/v1/branches', payload).then((data) => {
     cancelWait();
-    const branches = [...data.branches].sort(([a, b]) => {
+    const branches = [...data.branches].sort((a, b) => {
       if (a.name < b.name) return -1;
       if (a.name > b.name) return 1;
       return 0;
@@ -1018,7 +1018,7 @@ function selectSource(sourceToAdd, json) {
           (source) =>
             existingSources.find(({ id }) => source.id === id) === undefined,
         )
-        .sort(([a, b]) => {
+        .sort((a, b) => {
           if (a.name < b.name) return -1;
           if (a.name > b.name) return 1;
           return 0;
