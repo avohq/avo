@@ -1396,7 +1396,7 @@ function status(source, json, argv) {
           .map(
             ({ results }) =>
               Object.values(results).filter(
-                (missing) => Object.keys(missing).length > 0,
+                (missing) => Object.keys(missing).length === 0,
               ).length,
           )
           .reduce(sum, 0);
