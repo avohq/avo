@@ -19,7 +19,8 @@
   "scripts": {
     "postinstall": "node cli.js track-install",
     "lint": "eslint cli.js",
-    "format": "prettier --write cli.js"
+    "format": "prettier --write cli.js",
+    "compile": "tsc"
   },
   "files": [
     "cli.js",
@@ -56,6 +57,7 @@
     "eslint-config-airbnb-base": "^15.0.0",
     "eslint-config-prettier": "^8.5.0",
     "eslint-plugin-import": "^2.25.2",
-    "prettier": "2.7.1"
+    "prettier": "2.7.1",
+    "typescript": "^4.7.4"
   }
 }
