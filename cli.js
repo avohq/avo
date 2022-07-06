@@ -1283,7 +1283,10 @@ function status(source, json, argv) {
               const moduleMap = getModuleMap(data);
               const sourcePath = path.parse(source.path);
               const moduleName =
-                source.analysis.module ?? moduleMap ?? sourcePath.name ?? 'Avo';
+                source.analysis?.module ??
+                moduleMap ??
+                sourcePath.name ??
+                'Avo';
 
               const sourcePathExts = [];
 
@@ -1320,7 +1323,8 @@ function status(source, json, argv) {
 
               const globs = [
                 new Minimatch(
-                  source.analysis.glob ?? `**/*.+(${sourcePathExts.join('|')})`,
+                  source.analysis?.glob ??
+                    `**/*.+(${sourcePathExts.join('|')})`,
                   {},
                 ),
                 new Minimatch(`!${source.path}`, {}),
@@ -1364,21 +1368,23 @@ function status(source, json, argv) {
           'sources',
           sources.map((source) => ({
             name: `${source.name} (${source.path})`,
-            children: source.results.map((results, eventName) => ({
-              name: eventName,
-              children:
-                Object.keys(results).length > 0
-                  ? results.map((result, matchFile) => ({
-                      name: `used in ${matchFile}: ${result.length}${
-                        result.length === 1 ? ' time' : ' times'
-                      }`,
-                    }))
-                  : [
-                      {
-                        name: `${logSymbols.error} no usage found`,
-                      },
-                    ],
-            })),
+            children: Object.entries(source.results).map(
+              ([eventName, results]) => ({
+                name: eventName,
+                children:
+                  Object.keys(results).length > 0
+                    ? Object.entries(results).map(([matchFile, result]) => ({
+                        name: `used in ${matchFile}: ${result.length}${
+                          result.length === 1 ? ' time' : ' times'
+                        }`,
+                      }))
+                    : [
+                        {
+                          name: `${logSymbols.error} no usage found`,
+                        },
+                      ],
+              }),
+            ),
           })),
         );
 
@@ -1389,8 +1395,9 @@ function status(source, json, argv) {
         const missingEvents = sources
           .map(
             ({ results }) =>
-              results.filter((missing) => Object.keys(missing).length > 0)
-                .length,
+              Object.values(results).filter(
+                (missing) => Object.keys(missing).length > 0,
+              ).length,
           )
           .reduce(sum, 0);
 
@@ -1419,7 +1426,7 @@ function status(source, json, argv) {
             'missingEvents',
             sources.map((source) => ({
               name: `${source.name} (${source.path})`,
-              children: Object.values(source.results)
+              children: Object.entries(source.results)
                 .map(([eventName, results]) =>
                   Object.keys(results).length === 0
                     ? [
