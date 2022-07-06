@@ -336,11 +336,10 @@ const api = {
     let requestFunction = () => _request(reqOptions);
 
     if (options.auth === true) {
-      requestFunction = () => {
+      requestFunction = () =>
         api
           .addRequestHeaders(reqOptions)
           .then((reqOptionsWithToken) => _request(reqOptionsWithToken));
-      };
     }
 
     return requestFunction().catch((err) => {
