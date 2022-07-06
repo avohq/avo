@@ -1,6 +1,8 @@
 ## Unreleased
 
 * Breaking: Replace 'request' with 'got' for better security. Requires Node >= 14.16
+* Bump dependencies to resolve security issues
+* Add a hat to all dependencies for more dependency resolution flexibility
 
 ## 2.0.2 (2021-11-16)
 
