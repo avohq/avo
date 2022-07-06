@@ -15,7 +15,7 @@ import path from 'path';
 import pify from 'pify';
 import portfinder from 'portfinder';
 import querystring from 'querystring';
-import request from 'request';
+import got from 'got';
 import report from 'yurnalist';
 import semver from 'semver';
 import updateNotifier from 'update-notifier';
@@ -47,7 +47,7 @@ const customAnalyticsDestination = {
     api
       .request('POST', '/c/v1/track', {
         origin: api.apiOrigin,
-        data: {
+        json: {
           userId: userId,
           eventName: eventName,
           eventProperties: eventProperties
@@ -56,7 +56,9 @@ const customAnalyticsDestination = {
       .catch(function() {
         // don't crash on tracking errors
       });
-  }
+  },
+
+  setUserProperties: () => {} // noop
 };
 
 let inspector = new Inspector.AvoInspector({
@@ -122,46 +124,21 @@ var commandScopes;
 /////////////////////////////////////////////////////////////////////////
 // REQUEST HANDLING
 
-function _request(options, logOptions) {
-  logOptions = logOptions || {};
-
-  if (options.qs && !logOptions.skipQueryParams) {
-    qsLog = JSON.stringify(options.qs);
-  }
-
+function _request(options) {
   return new Promise(function(resolve, reject) {
-    var req = request(options, function(err, response, body) {
-      if (err) {
-        return reject(
-          new AvoError('Server Error. ' + err.message, {
-            original: err,
-            exit: 2
-          })
-        );
+    got(options).json().then((response) => {
+      if (response.statusCode >= 400) {
+        return reject(responseToError(response));
       }
-
-      if (response.statusCode >= 400 && !logOptions.skipResponseBody) {
-        if (!options.resolveOnHTTPError) {
-          return reject(responseToError(response, body, options));
-        }
-      }
-      return resolve({
-        status: response.statusCode,
-        response: response,
-        body: body
-      });
+      return resolve(response);
+    }).catch(err => {
+      return reject(
+        new AvoError('Server Error. ' + err.message, {
+          original: err,
+          exit: 2
+        })
+      );
     });
-
-    if (_.size(options.files) > 0) {
-      var form = req.form();
-      _.forEach(options.files, function(details, param) {
-        form.append(param, details.stream, {
-          knownLength: details.knownLength,
-          filename: details.filename,
-          contentType: details.contentType
-        });
-      });
-    }
   });
 }
 
@@ -199,25 +176,16 @@ var api = {
     });
   },
   request: function(method, resource, options) {
-    options = _.extend(
-      {
-        data: {},
-        origin: undefined, // origin must be set
-        resolveOnHTTPError: false, // by default, status codes >= 400 leads to reject
-        json: true,
-        gzip: true
-      },
-      options
-    );
-
     var validMethods = ['GET', 'PUT', 'POST', 'DELETE', 'PATCH'];
 
-    if (validMethods.indexOf(method) < 0) {
+    if (!validMethods.includes(method)) {
       method = 'GET';
     }
 
     var reqOptions = {
-      method: method
+      method: method,
+      decompress: true,
+      headers: options.headers || {},
     };
 
     if (options.query) {
@@ -225,33 +193,26 @@ var api = {
     }
 
     if (method === 'GET') {
-      resource = _appendQueryData(resource, options.data);
+      resource = _appendQueryData(resource, options.json);
     } else {
-      if (_.size(options.data) > 0) {
-        reqOptions.body = options.data;
+      if (_.size(options.json) > 0) {
+        reqOptions.json = options.json;
       } else if (_.size(options.form) > 0) {
         reqOptions.form = options.form;
       }
     }
 
     reqOptions.url = options.origin + resource;
-    reqOptions.files = options.files;
-    reqOptions.resolveOnHTTPError = options.resolveOnHTTPError;
-    reqOptions.json = options.json;
-    reqOptions.gzip = options.gzip;
-    reqOptions.qs = options.qs;
-    reqOptions.headers = options.headers;
-    reqOptions.timeout = options.timeout;
 
     var requestFunction = function() {
-      return _request(reqOptions, options.logOptions);
+      return _request(reqOptions);
     };
     if (options.auth === true) {
       requestFunction = function() {
         return api
           .addRequestHeaders(reqOptions)
           .then(function(reqOptionsWithToken) {
-            return _request(reqOptionsWithToken, options.logOptions);
+            return _request(reqOptionsWithToken);
           });
       };
     }
@@ -363,13 +324,13 @@ function getMasterStatus(json) {
       .request('POST', '/c/v1/master', {
         origin: api.apiOrigin,
         auth: true,
-        data: {
+        json: {
           schemaId: json.schema.id,
           branchId: json.branch.id
         }
       })
-      .then(res => {
-        return res.body.pullRequired
+      .then(({pullRequired}) => {
+        return pullRequired
           ? BRANCH_NOT_UP_TO_DATE
           : BRANCH_UP_TO_DATE;
       });
@@ -386,7 +347,7 @@ function pullMaster(json) {
       .request('POST', '/c/v1/master/pull', {
         origin: api.apiOrigin,
         auth: true,
-        data: {
+        json: {
           schemaId: json.schema.id,
           branchId: json.branch.id,
           force: json.force
@@ -647,10 +608,9 @@ function init() {
       origin: api.apiOrigin,
       auth: true
     })
-    .then(res => {
+    .then(({workspaces}) => {
       cancelWait();
-      let result = res.body;
-      let schemas = _.orderBy(result.workspaces, 'lastUsedAt', 'desc');
+      let schemas = _.orderBy(workspaces, 'lastUsedAt', 'desc');
       if (schemas.length > 1) {
         let choices = schemas.map(schema => ({
           value: schema,
@@ -747,15 +707,14 @@ function selectSource(sourceToAdd, json) {
     .request('POST', '/c/v1/sources', {
       origin: api.apiOrigin,
       auth: true,
-      data: {
+      json: {
         schemaId: json.schema.id,
         branchId: json.branch.id
       }
     })
-    .then(res => {
+    .then((data) => {
       cancelWait();
-      let result = res.body;
-      let existingSources = json.sources || [];
+      let existingSources = data.sources || [];
       let sources = _.sortBy(
         _.filter(
           result.sources,
@@ -850,25 +809,22 @@ function selectSource(sourceToAdd, json) {
 }
 
 function fetchBranches(json) {
-  const schemaId = json.schema.id;
   wait('Fetching open branches');
   const payload = {
     origin: api.apiOrigin,
     auth: true,
-    data: {
+    json: {
       schemaId: json.schema.id
     }
   };
-  return api.request('POST', '/c/v1/branches', payload).then(res => {
+  return api.request('POST', '/c/v1/branches', payload).then(data => {
     cancelWait();
-    let result = res.body;
-    let branches = _.sortBy(result.branches, 'name');
+    let branches = _.sortBy(data.branches, 'name');
     // The api still returns master for backwards comparability so we manually
     // update the branch name to main
     return branches.map(
       branch => branch.name === "master" ? {...branch, name: "main"} : branch
     );
-    return branches;
   });
 }
 
@@ -970,7 +926,7 @@ function pull(sourceFilter, json) {
       return api.request('POST', '/c/v1/pull', {
         origin: api.apiOrigin,
         auth: true,
-        data: {
+        json: {
           schemaId: json.schema.id,
           branchId: json.branch.id,
           sources: _.map(sources, source => {
@@ -980,10 +936,8 @@ function pull(sourceFilter, json) {
         }
       });
     })
-    .then(res => {
-
+    .then(result => {
       cancelWait();
-      let result = res.body;
       if (result.ok) {
         codegen(json, result);
       } else {
@@ -2061,38 +2015,33 @@ function _refreshAccessToken(refreshToken) {
   return api
     .request('POST', '/auth/refresh', {
       origin: api.apiOrigin,
-      data: {
+      json: {
         token: refreshToken
       }
     })
-    .then(
-      function(res) {
-        if (res.status === 401 || res.status === 400) {
-          return {idToken: refreshToken};
-        }
-
-        if (!_.isString(res.body.idToken)) {
-          throw INVALID_CREDENTIAL_ERROR;
-        }
-        lastAccessToken = _.assign(
-          {
-            expiresAt: Date.now() + res.body.expiresIn * 1000,
-            refreshToken: refreshToken
-          },
-          res.body
-        );
-
-        var currentRefreshToken = _.get(conf.get('tokens'), 'refreshToken');
-        if (refreshToken === currentRefreshToken) {
-          conf.set('tokens', lastAccessToken);
-        }
-
-        return lastAccessToken;
-      },
-      function(err) {
+    .then(data => {
+      if (!_.isString(data.idToken)) {
         throw INVALID_CREDENTIAL_ERROR;
       }
-    );
+      lastAccessToken = _.assign(
+        {
+          expiresAt: Date.now() + data.expiresIn * 1000,
+          refreshToken: refreshToken
+        },
+        data
+      );
+
+      var currentRefreshToken = _.get(conf.get('tokens'), 'refreshToken');
+      if (refreshToken === currentRefreshToken) {
+        conf.set('tokens', lastAccessToken);
+      }
+
+      return lastAccessToken;
+    },
+    function(err) {
+      throw INVALID_CREDENTIAL_ERROR;
+    }
+  );
 }
 
 function _getLoginUrl(callbackUrl) {
@@ -2138,7 +2087,7 @@ function _loginWithLocalhost(port) {
               tokens: tokens
             });
           })
-          .catch(function() {
+          .catch(() => {
             return _respondWithRedirect(
               req,
               res,
@@ -2192,28 +2141,27 @@ function _getTokensFromAuthorizationCode(code, callbackUrl) {
   return api
     .request('POST', '/auth/token', {
       origin: api.apiOrigin,
-      data: {
+      json: {
         token: code,
         redirect_uri: callbackUrl
       }
     })
-    .then(
-      function(res) {
-        if (!_.has(res, 'body.idToken') && !_.has(res, 'body.refreshToken')) {
-          throw INVALID_CREDENTIAL_ERROR;
-        }
-        lastAccessToken = _.assign(
-          {
-            expiresAt: Date.now() + res.body.expiresIn * 1000
-          },
-          res.body
-        );
-        return lastAccessToken;
-      },
-      function(err) {
+    .then(data => {
+      if (!data.idToken && !data.refreshToken) {
         throw INVALID_CREDENTIAL_ERROR;
       }
-    );
+      lastAccessToken = _.assign(
+        {
+          expiresAt: Date.now() + data.expiresIn * 1000
+        },
+        data
+      );
+      return lastAccessToken;
+    },
+    function() {
+      throw INVALID_CREDENTIAL_ERROR;
+    }
+  );
 }
 
 function _getCallbackUrl(port) {
@@ -2235,7 +2183,8 @@ function logout(refreshToken) {
   }
 }
 
-function responseToError(response, body) {
+function responseToError(response) {
+  let body = response.body;
   if (typeof body === 'string' && response.statusCode === 404) {
     body = {
       error: {
