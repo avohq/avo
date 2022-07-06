@@ -1,0 +1,21 @@
+name: CI
+on: push
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v3
+    - uses: actions/setup-node@v3
+      with:
+        node-version: 16
+        cache: 'yarn'
+    - name: Install modules
+      run: yarn install --immutable
+    - name: Run ESLint
+      run: yarn eslint cli.js
+    - name: Run Prettier
+      run: yarn prettier --check cli.js
+    - name: Avo status
+      run: node cli.js status
