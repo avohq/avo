@@ -2,7 +2,7 @@
 
 ## Install
 
-To install the latest version of Avo CLI, run this command:
+Avo runs on Node `>=14.16`. To install the latest version of Avo CLI, run this command:
 
 ```
 npm install -g avo
