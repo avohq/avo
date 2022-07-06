@@ -40,17 +40,16 @@ For more detailed documentation, visit [https://www.avo.app/docs/commands](https
 
 Thank you, you are precious to us :hug: Please send an email to friends@avo.app or file an issue here on GitHub.
 
-## How to Commit
+## How to contribute
 
-```
-yarn commit
-```
+Make your changes and add them to the _Unreleased_ section in CHANGELOG.md
 
 ## How to Create a Release
 
-1. Update the semantic version in `package.json`
-2. Add a changelog entry in `CHANGELOG.md`
-2. Publish the package to npm
+1. Verify that the changes in the _Unrelased_ section in CHANGELOG.md are accurate, create a new heading with the correct semantic version then move the content from the _Unreleased_ section there
+2. Update the semantic version in `package.json` to match the one you just created in the changelog
+3. Commit with the message "Release <version>" and push the changes
+4. Publish the package to npm (you'll need to be a maintainer of the avo project in npm)
 
 ```
 npm publish
