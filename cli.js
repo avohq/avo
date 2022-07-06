@@ -34,13 +34,12 @@ import fuzzypath from 'inquirer-fuzzy-path';
 
 import Avo from './Avo.js';
 
-const pkg = JSON.parse(fs.readFileSync(new URL('package.json', import.meta.url)));
+const pkg = JSON.parse(
+  fs.readFileSync(new URL('package.json', import.meta.url)),
+);
 
 const { Minimatch } = minimatch;
-const {
-  cyan, gray, red, bold, underline,
-} = chalk;
-
+const { cyan, gray, red, bold, underline } = chalk;
 
 /// //////////////////////////////////////////////////////////////////////
 // LOGGING
@@ -174,8 +173,9 @@ function responseToError(response) {
     };
   }
 
-  const message = `HTTP Error: ${response.statusCode}, ${body.error.message
-    || body.error}`;
+  const message = `HTTP Error: ${response.statusCode}, ${
+    body.error.message || body.error
+  }`;
 
   let exitCode;
   if (response.statusCode >= 500) {
@@ -198,17 +198,22 @@ function responseToError(response) {
 
 function _request(options) {
   return new Promise((resolve, reject) => {
-    got(options).json().then((response) => {
-      if (response.statusCode >= 400) {
-        return reject(responseToError(response));
-      }
-      return resolve(response);
-    }).catch((err) => reject(
-      new AvoError(`Server Error. ${err.message}`, {
-        original: err,
-        exit: 2,
-      }),
-    ));
+    got(options)
+      .json()
+      .then((response) => {
+        if (response.statusCode >= 400) {
+          return reject(responseToError(response));
+        }
+        return resolve(response);
+      })
+      .catch((err) =>
+        reject(
+          new AvoError(`Server Error. ${err.message}`, {
+            original: err,
+            exit: 2,
+          }),
+        ),
+      );
   });
 }
 
@@ -222,9 +227,9 @@ const _appendQueryData = (urlPath, data) => {
 };
 
 function _refreshAccessToken(refreshToken) {
-  return api // eslint-ignore
+  return api // eslint-disable-line
     .request('POST', '/auth/refresh', {
-      origin: api.apiOrigin,
+      origin: api.apiOrigin, // eslint-disable-line
       json: {
         token: refreshToken,
       },
@@ -249,10 +254,26 @@ function _refreshAccessToken(refreshToken) {
 
         return lastAccessToken;
       },
-      (err) => {
+      () => {
         throw INVALID_CREDENTIAL_ERROR;
       },
     );
+}
+
+function _haveValidAccessToken(refreshToken) {
+  if (_.isEmpty(lastAccessToken)) {
+    const tokens = conf.get('tokens');
+    if (refreshToken === _.get(tokens, 'refreshToken')) {
+      lastAccessToken = tokens;
+    }
+  }
+
+  return (
+    _.has(lastAccessToken, 'idToken') &&
+    lastAccessToken.refreshToken === refreshToken &&
+    _.has(lastAccessToken, 'expiresAt') &&
+    lastAccessToken.expiresAt > Date.now() + FIFTEEN_MINUTES_IN_MS
+  );
 }
 
 function getAccessToken(refreshToken) {
@@ -328,8 +349,8 @@ const api = {
 
     return requestFunction().catch((err) => {
       if (
-        options.retryCodes
-        && _.includes(
+        options.retryCodes &&
+        _.includes(
           options.retryCodes,
           _.get(err, 'context.response.statusCode'),
         )
@@ -367,7 +388,10 @@ const customAnalyticsDestination = {
 };
 
 const inspector = new Inspector.AvoInspector({
-  apiKey: '3UWtteG9HenZ825cYoYr', env: Inspector.AvoInspectorEnv.Prod, version: '1.0.0', appName: 'Avo CLI',
+  apiKey: '3UWtteG9HenZ825cYoYr',
+  env: Inspector.AvoInspectorEnv.Prod,
+  version: '1.0.0',
+  appName: 'Avo CLI',
 });
 
 // setup Avo analytics
@@ -396,9 +420,9 @@ const MERGE_CONFLICT_SEP = '=======';
 const MERGE_CONFLICT_START = '<<<<<<<';
 function hasMergeConflicts(str) {
   return (
-    str.includes(MERGE_CONFLICT_START)
-    && str.includes(MERGE_CONFLICT_SEP)
-    && str.includes(MERGE_CONFLICT_END)
+    str.includes(MERGE_CONFLICT_START) &&
+    str.includes(MERGE_CONFLICT_SEP) &&
+    str.includes(MERGE_CONFLICT_END)
   );
 }
 
@@ -450,7 +474,7 @@ function validateAvoJson(json) {
   }
 
   // augment the latest major version into avo.json
-  json.avo = { ...json.avo || {}, version: semver.major(pkg.version) };
+  json.avo = { ...(json.avo || {}), version: semver.major(pkg.version) };
 
   return json;
 }
@@ -471,9 +495,9 @@ function getMasterStatus(json) {
         branchId: json.branch.id,
       },
     })
-    .then(({ pullRequired }) => (pullRequired
-      ? BRANCH_NOT_UP_TO_DATE
-      : BRANCH_UP_TO_DATE));
+    .then(({ pullRequired }) =>
+      pullRequired ? BRANCH_NOT_UP_TO_DATE : BRANCH_UP_TO_DATE,
+    );
 }
 
 function pullMaster(json) {
@@ -481,7 +505,9 @@ function pullMaster(json) {
     report.info('Your current branch is main');
     return Promise.resolve(json);
   }
-  wait(json.force ? 'Force pulling main into branch' : 'Pulling main into branch');
+  wait(
+    json.force ? 'Force pulling main into branch' : 'Pulling main into branch',
+  );
   return api
     .request('POST', '/c/v1/master/pull', {
       origin: api.apiOrigin,
@@ -506,7 +532,8 @@ function promptPullMaster(json) {
       cancelWait();
       if (branchStatus == BRANCH_UP_TO_DATE) {
         return Promise.resolve([branchStatus]);
-      } if (branchStatus == BRANCH_NOT_UP_TO_DATE) {
+      }
+      if (branchStatus == BRANCH_NOT_UP_TO_DATE) {
         return inquirer
           .prompt([
             {
@@ -525,7 +552,8 @@ function promptPullMaster(json) {
       if (branchStatus == BRANCH_UP_TO_DATE) {
         report.success('Branch is up to date with main');
         return Promise.resolve(json);
-      } if (answer.pull) {
+      }
+      if (answer.pull) {
         return pullMaster(json);
       }
       report.info('Did not pull main into branch');
@@ -549,8 +577,8 @@ function resolveAvoJsonConflicts(file, { argv, skipPullMaster }) {
   });
 
   if (
-    head.avo.version != incoming.avo.version
-    || head.schema.id != incoming.schema.id
+    head.avo.version != incoming.avo.version ||
+    head.schema.id != incoming.schema.id
   ) {
     Avo.cliConflictResolveFailed({
       userId_: installIdOrUserId(),
@@ -566,7 +594,10 @@ function resolveAvoJsonConflicts(file, { argv, skipPullMaster }) {
   }
 
   if (
-    !_.isEqual(head.sources.map((s) => s.id), incoming.sources.map((s) => s.id))
+    !_.isEqual(
+      head.sources.map((s) => s.id),
+      incoming.sources.map((s) => s.id),
+    )
   ) {
     Avo.cliConflictResolveFailed({
       userId_: installIdOrUserId(),
@@ -587,43 +618,75 @@ function resolveAvoJsonConflicts(file, { argv, skipPullMaster }) {
     branch: head.branch,
     sources: head.sources,
   };
-  return requireAuth(argv, () => fetchBranches(nextAvoJson).then((branches) => {
-    const isHeadBranchOpen = branches.find((branch) => branch.id == nextAvoJson.branch.id);
-
-    const isIncomingBranchOpen = branches.find((branch) => branch.id == incoming.branch.id);
-
-    function switchBranchIfRequired(json) {
-      if (isHeadBranchOpen) {
-        return Promise.resolve(json);
-      }
-      report.info(
-        `Your current branch '${json.branch.name}' has been closed or merged. Go to another branch:`,
+  return requireAuth(argv, () =>
+    fetchBranches(nextAvoJson).then((branches) => {
+      const isHeadBranchOpen = branches.find(
+        (branch) => branch.id == nextAvoJson.branch.id,
       );
-      return checkout(null, json);
-    }
 
-    return switchBranchIfRequired(nextAvoJson)
-      .then((json) => {
-        if (
-          head.branch.id == incoming.branch.id
-            || incoming.branch.id == 'master'
-        ) {
-          return Promise.resolve([true, json]);
-        }
-        return Promise.resolve([false, json]);
-      })
-      .then(([isDone, json]) => {
-        if (!isDone && isIncomingBranchOpen && argv.force) {
-          report.warn(
-            `Incoming branch, ${
-              incoming.branch.name
-            }, has not been merged to Avo main. To review and merge go to: ${link(
-              `https://www.avo.app/schemas/${nextAvoJson.schema.id}/branches/${incoming.branch.id}/diff`,
-            )}`,
-          );
+      const isIncomingBranchOpen = branches.find(
+        (branch) => branch.id == incoming.branch.id,
+      );
+
+      function switchBranchIfRequired(json) {
+        if (isHeadBranchOpen) {
           return Promise.resolve(json);
-        } if (!isDone && isIncomingBranchOpen) {
-          Avo.cliConflictResolveFailed({
+        }
+        report.info(
+          `Your current branch '${json.branch.name}' has been closed or merged. Go to another branch:`,
+        );
+        return checkout(null, json);
+      }
+
+      return switchBranchIfRequired(nextAvoJson)
+        .then((json) => {
+          if (
+            head.branch.id == incoming.branch.id ||
+            incoming.branch.id == 'master'
+          ) {
+            return Promise.resolve([true, json]);
+          }
+          return Promise.resolve([false, json]);
+        })
+        .then(([isDone, json]) => {
+          if (!isDone && isIncomingBranchOpen && argv.force) {
+            report.warn(
+              `Incoming branch, ${
+                incoming.branch.name
+              }, has not been merged to Avo main. To review and merge go to: ${link(
+                `https://www.avo.app/schemas/${nextAvoJson.schema.id}/branches/${incoming.branch.id}/diff`,
+              )}`,
+            );
+            return Promise.resolve(json);
+          }
+          if (!isDone && isIncomingBranchOpen) {
+            Avo.cliConflictResolveFailed({
+              userId_: installIdOrUserId(),
+              cliInvokedByCi: invokedByCi(),
+              schemaId: head.schema.id,
+              schemaName: head.schema.name,
+              branchId: head.branch.id,
+              branchName: head.branch.name,
+            });
+            throw new Error(
+              `Incoming branch, ${
+                incoming.branch.name
+              }, has not been merged to Avo main.\n\nTo review and merge go to:\n${link(
+                `https://www.avo.app/schemas/${nextAvoJson.schema.id}/branches/${incoming.branch.id}/diff`,
+              )}\n\nOnce merged, run 'avo pull'. To skip this check use the --force flag.`,
+            );
+          } else {
+            return Promise.resolve(json);
+          }
+        })
+        .then((json) => {
+          if (skipPullMaster) {
+            return Promise.resolve(json);
+          }
+          return promptPullMaster(json);
+        })
+        .then((json) => {
+          Avo.cliConflictResolveSucceeded({
             userId_: installIdOrUserId(),
             cliInvokedByCi: invokedByCi(),
             schemaId: head.schema.id,
@@ -631,36 +694,11 @@ function resolveAvoJsonConflicts(file, { argv, skipPullMaster }) {
             branchId: head.branch.id,
             branchName: head.branch.name,
           });
-          throw new Error(
-            `Incoming branch, ${
-              incoming.branch.name
-            }, has not been merged to Avo main.\n\nTo review and merge go to:\n${link(
-              `https://www.avo.app/schemas/${nextAvoJson.schema.id}/branches/${incoming.branch.id}/diff`,
-            )}\n\nOnce merged, run 'avo pull'. To skip this check use the --force flag.`,
-          );
-        } else {
-          return Promise.resolve(json);
-        }
-      })
-      .then((json) => {
-        if (skipPullMaster) {
-          return Promise.resolve(json);
-        }
-        return promptPullMaster(json);
-      })
-      .then((json) => {
-        Avo.cliConflictResolveSucceeded({
-          userId_: installIdOrUserId(),
-          cliInvokedByCi: invokedByCi(),
-          schemaId: head.schema.id,
-          schemaName: head.schema.name,
-          branchId: head.branch.id,
-          branchName: head.branch.name,
+          report.success('Successfully resolved Avo merge conflicts');
+          return validateAvoJson(json);
         });
-        report.success('Successfully resolved Avo merge conflicts');
-        return validateAvoJson(json);
-      });
-  }));
+    }),
+  );
 }
 
 function loadAvoJson() {
@@ -695,7 +733,6 @@ function loadAvoJsonOrInit({ argv, skipPullMaster, skipInit }) {
     .then(validateAvoJson)
     .catch((error) => {
       if (error.code === 'ENOENT' && skipInit) {
-
       } else if (error.code === 'ENOENT') {
         report.info('Avo not initialized');
         return requireAuth(argv, init);
@@ -753,7 +790,8 @@ function init() {
             },
           ])
           .then((answer) => makeAvoJson(answer.schema));
-      } if (schemas.length === 0) {
+      }
+      if (schemas.length === 0) {
         throw new AvoError(
           `No workspaces to initialize. Go to ${link(
             'wwww.avo.app',
@@ -789,9 +827,9 @@ function codegen(json, result) {
     return source;
   });
 
-  const sourceTasks = targets.map((target) => Promise.all(
-    target.code.map((code) => writeFile(code.path, code.content)),
-  ));
+  const sourceTasks = targets.map((target) =>
+    Promise.all(target.code.map((code) => writeFile(code.path, code.content))),
+  );
 
   const avoJsonTask = writeAvoJson(newJson);
 
@@ -800,7 +838,11 @@ function codegen(json, result) {
       report.warn(`${errors}\n`);
     }
 
-    if (warnings !== undefined && warnings !== null && Array.isArray(warnings)) {
+    if (
+      warnings !== undefined &&
+      warnings !== null &&
+      Array.isArray(warnings)
+    ) {
       warnings.forEach((warning) => {
         report.warn(warning);
       });
@@ -811,7 +853,10 @@ function codegen(json, result) {
       } successfully updated`,
     );
     targets.forEach((target) => {
-      const source = _.find(newJson.sources, (source) => source.id === target.id);
+      const source = _.find(
+        newJson.sources,
+        (source) => source.id === target.id,
+      );
       report.tree('sources', [
         {
           name: source.name,
@@ -839,10 +884,11 @@ function selectSource(sourceToAdd, json) {
       let sources = _.sortBy(
         _.filter(
           result.sources,
-          (source) => _.find(
-            existingSources,
-            (existingSource) => source.id === existingSource.id,
-          ) === undefined,
+          (source) =>
+            _.find(
+              existingSources,
+              (existingSource) => source.id === existingSource.id,
+            ) === undefined,
         ),
         'name',
       );
@@ -851,7 +897,8 @@ function selectSource(sourceToAdd, json) {
         {
           type: 'fuzzypath',
           name: 'folder',
-          excludePath: (path) => path.startsWith('node_modules') || path.startsWith('.git'),
+          excludePath: (path) =>
+            path.startsWith('node_modules') || path.startsWith('.git'),
           itemType: 'directory',
           rootPath: '.',
           message: 'Select a folder to save the analytics wrapper in',
@@ -862,7 +909,10 @@ function selectSource(sourceToAdd, json) {
       ];
 
       if (!sourceToAdd) {
-        const choices = sources.map((source) => ({ value: source, name: source.name }));
+        const choices = sources.map((source) => ({
+          value: source,
+          name: source.name,
+        }));
 
         prompts.unshift({
           type: 'list',
@@ -880,7 +930,9 @@ function selectSource(sourceToAdd, json) {
           },
         });
       } else {
-        const source = _.find(sources, (source) => matchesSource(source, sourceToAdd));
+        const source = _.find(sources, (source) =>
+          matchesSource(source, sourceToAdd),
+        );
         if (!source) {
           throw new AvoError(`Source ${sourceToAdd} does not exist`);
         }
@@ -901,7 +953,9 @@ function selectSource(sourceToAdd, json) {
         );
         let source;
         if (sourceToAdd) {
-          source = _.find(sources, (source) => matchesSource(source, sourceToAdd));
+          source = _.find(sources, (source) =>
+            matchesSource(source, sourceToAdd),
+          );
           source = { id: source.id, name: source.name, path: relativePath };
         } else {
           source = {
@@ -935,8 +989,8 @@ function fetchBranches(json) {
     const branches = _.sortBy(data.branches, 'name');
     // The api still returns master for backwards comparability so we manually
     // update the branch name to main
-    return branches.map(
-      (branch) => (branch.name === 'master' ? { ...branch, name: 'main' } : branch),
+    return branches.map((branch) =>
+      branch.name === 'master' ? { ...branch, name: 'main' } : branch,
     );
   });
 }
@@ -944,7 +998,10 @@ function fetchBranches(json) {
 function checkout(branchToCheckout, json) {
   return fetchBranches(json).then((branches) => {
     if (!branchToCheckout) {
-      const choices = branches.map((branch) => ({ value: branch, name: branch.name }));
+      const choices = branches.map((branch) => ({
+        value: branch,
+        name: branch.name,
+      }));
       const currentBranch = _.find(
         branches,
         (branch) => branch.id == json.branch.id,
@@ -956,8 +1013,8 @@ function checkout(branchToCheckout, json) {
             name: 'branch',
             message: 'Select a branch',
             default:
-              currentBranch
-              || _.find(branches, (branch) => branch.id == 'master'),
+              currentBranch ||
+              _.find(branches, (branch) => branch.id == 'master'),
             choices,
             pageSize: 15,
           },
@@ -981,17 +1038,21 @@ function checkout(branchToCheckout, json) {
     }
     if (branchToCheckout == 'master') {
       report.info(
-        'The master branch has been renamed to main. Continuing checkout with main branch...\'',
+        "The master branch has been renamed to main. Continuing checkout with main branch...'",
       );
     }
-    const adjustedBranchToCheckout = branchToCheckout == 'master' ? 'main' : branchToCheckout;
+    const adjustedBranchToCheckout =
+      branchToCheckout == 'master' ? 'main' : branchToCheckout;
     if (adjustedBranchToCheckout == json.branch.name) {
       // XXX should check here if json.branch.id === branch.id from server
       // if not, it indicates branch delete, same branch re-created and client is out of sync
       report.info(`Already on '${adjustedBranchToCheckout}'`);
       return json;
     }
-    const branch = _.find(branches, (branch) => branch.name == adjustedBranchToCheckout);
+    const branch = _.find(
+      branches,
+      (branch) => branch.name == adjustedBranchToCheckout,
+    );
     if (!branch) {
       report.error(
         `Branch '${adjustedBranchToCheckout}' does not exist. Run ${cmd(
@@ -1032,16 +1093,21 @@ function pull(sourceFilter, json) {
       }
       return Promise.resolve();
     })
-    .then(() => api.request('POST', '/c/v1/pull', {
-      origin: api.apiOrigin,
-      auth: true,
-      json: {
-        schemaId: json.schema.id,
-        branchId: json.branch.id,
-        sources: _.map(sources, (source) => ({ id: source.id, path: source.path })),
-        force: json.force || false,
-      },
-    }))
+    .then(() =>
+      api.request('POST', '/c/v1/pull', {
+        origin: api.apiOrigin,
+        auth: true,
+        json: {
+          schemaId: json.schema.id,
+          branchId: json.branch.id,
+          sources: _.map(sources, (source) => ({
+            id: source.id,
+            path: source.path,
+          })),
+          force: json.force || false,
+        },
+      }),
+    )
     .then((result) => {
       cancelWait();
       if (result.ok) {
@@ -1142,14 +1208,20 @@ function getSource(argv, json) {
       if (argv.source) {
         report.info(`Setting up source "${argv.source}"`);
       }
-      return selectSource(argv.source, json).then((json) => [argv.source, json]);
+      return selectSource(argv.source, json).then((json) => [
+        argv.source,
+        json,
+      ]);
     });
-  } if (
-    argv.source
-    && !_.find(json.sources, (source) => matchesSource(source, argv.source))
+  }
+  if (
+    argv.source &&
+    !_.find(json.sources, (source) => matchesSource(source, argv.source))
   ) {
     report.error(`Source ${argv.source} not found`);
-    return requireAuth(argv, () => selectSource(argv.source, json).then((json) => [argv.source, json]));
+    return requireAuth(argv, () =>
+      selectSource(argv.source, json).then((json) => [argv.source, json]),
+    );
   }
   return Promise.resolve([argv.source, json]);
 }
@@ -1166,79 +1238,103 @@ function status(source, json, argv) {
   }).then((results) => {
     results = results.filter((path) => !path.startsWith('.git'));
     return Promise.all(
-      results.map((path) => pify(fs.lstat)(path).then((stats) => {
-        if (stats.isSymbolicLink()) {
-          return [];
-        }
-        return pify(fs.readFile)(path, 'utf8').then((data) => [path, data]);
-      })),
+      results.map((path) =>
+        pify(fs.lstat)(path).then((stats) => {
+          if (stats.isSymbolicLink()) {
+            return [];
+          }
+          return pify(fs.readFile)(path, 'utf8').then((data) => [path, data]);
+        }),
+      ),
     ).then((cachePairs) => _.fromPairs(cachePairs));
   });
 
   fileCache
     .then((cache) => {
       sources = Promise.all(
-        sources.map((source) => pify(fs.readFile)(source.path, 'utf8').then((data) => {
-          const eventMap = getEventMap(data);
-          if (eventMap !== null) {
-            const moduleMap = getModuleMap(data);
-            const sourcePath = path.parse(source.path);
-            const moduleName = _.get(
-              source,
-              'analysis.module',
-              moduleMap || sourcePath.name || 'Avo',
-            );
+        sources.map((source) =>
+          pify(fs.readFile)(source.path, 'utf8').then((data) => {
+            const eventMap = getEventMap(data);
+            if (eventMap !== null) {
+              const moduleMap = getModuleMap(data);
+              const sourcePath = path.parse(source.path);
+              const moduleName = _.get(
+                source,
+                'analysis.module',
+                moduleMap || sourcePath.name || 'Avo',
+              );
 
-            const sourcePathExts = [];
+              const sourcePathExts = [];
 
-            if (sourcePath.ext === '.js' || sourcePath.ext === '.ts') {
-              sourcePathExts.push('js');
-              sourcePathExts.push('jsx');
-              sourcePathExts.push('ts');
-              sourcePathExts.push('tsx');
-            } else if (sourcePath.ext === '.java' || sourcePath.ext === '.kt') {
-              sourcePathExts.push('java');
-              sourcePathExts.push('kt');
-            } else if (sourcePath.ext === '.m' || sourcePath.ext === '.swift') {
-              sourcePathExts.push('m');
-              sourcePathExts.push('swift');
-            } else if (sourcePath.ext === '.re') {
-              sourcePathExts.push('re');
-              sourcePathExts.push('res');
-            } else {
-              sourcePathExts.push(sourcePath.ext.substring(1));
+              if (sourcePath.ext === '.js' || sourcePath.ext === '.ts') {
+                sourcePathExts.push('js');
+                sourcePathExts.push('jsx');
+                sourcePathExts.push('ts');
+                sourcePathExts.push('tsx');
+              } else if (
+                sourcePath.ext === '.java' ||
+                sourcePath.ext === '.kt'
+              ) {
+                sourcePathExts.push('java');
+                sourcePathExts.push('kt');
+              } else if (
+                sourcePath.ext === '.m' ||
+                sourcePath.ext === '.swift'
+              ) {
+                sourcePathExts.push('m');
+                sourcePathExts.push('swift');
+              } else if (sourcePath.ext === '.re') {
+                sourcePathExts.push('re');
+                sourcePathExts.push('res');
+              } else {
+                sourcePathExts.push(sourcePath.ext.substring(1));
+              }
+
+              if (argv.verbose) {
+                console.log(
+                  'Looking in files with extensions:',
+                  sourcePathExts,
+                );
+              }
+
+              const globs = [
+                new Minimatch(
+                  _.get(
+                    source,
+                    'analysis.glob',
+                    `**/*.+(${sourcePathExts.join('|')})`,
+                  ),
+                  {},
+                ),
+                new Minimatch(`!${source.path}`, {}),
+              ];
+
+              const lookup = _.pickBy(cache, (value, path) =>
+                _.every(globs, (mm) => mm.match(path)),
+              );
+
+              return Promise.all(
+                eventMap.map((eventName) => {
+                  const re = new RegExp(
+                    `(${moduleName}\\.${eventName}|\\[${moduleName} ${eventName})`,
+                  );
+                  const results = _.flatMap(lookup, (data, path) => {
+                    if (argv.verbose) {
+                      report.info(`Looking for events in ${path}`);
+                    }
+                    const results = findMatches(data, re);
+                    return results.length ? [[path, results]] : [];
+                  });
+                  return [eventName, _.fromPairs(results)];
+                }),
+              ).then((results) => ({
+                ...source,
+                results: _.fromPairs(results),
+              }));
             }
-
-            if (argv.verbose) {
-              console.log('Looking in files with extensions:', sourcePathExts);
-            }
-
-            const globs = [
-              new Minimatch(
-                _.get(source, 'analysis.glob', `**/*.+(${sourcePathExts.join('|')})`),
-                {},
-              ),
-              new Minimatch(`!${source.path}`, {}),
-            ];
-
-            const lookup = _.pickBy(cache, (value, path) => _.every(globs, (mm) => mm.match(path)));
-
-            return Promise.all(
-              eventMap.map((eventName) => {
-                const re = new RegExp(`(${moduleName}\\.${eventName}|\\[${moduleName} ${eventName})`);
-                const results = _.flatMap(lookup, (data, path) => {
-                  if (argv.verbose) {
-                    report.info(`Looking for events in ${path}`);
-                  }
-                  const results = findMatches(data, re);
-                  return results.length ? [[path, results]] : [];
-                });
-                return [eventName, _.fromPairs(results)];
-              }),
-            ).then((results) => ({ ...source, results: _.fromPairs(results) }));
-          }
-          return source;
-        })),
+            return source;
+          }),
+        ),
       );
 
       return sources.then((sources) => {
@@ -1246,60 +1342,68 @@ function status(source, json, argv) {
           'sources',
           sources.map((source) => ({
             name: `${source.name} (${source.path})`,
-            children:
-                  _.map(source.results, (results, eventName) => ({
-                    name: eventName,
-                    children:
-                        _.size(results) > 0
-                          ? _.map(results, (result, matchFile) => ({
-                            name:
-                                  `used in ${
-                                    matchFile
-                                  }: ${
-                                    result.length
-                                  }${result.length === 1 ? ' time' : ' times'}`,
-                          }))
-                          : [
-                            {
-                              name: `${logSymbols.error} no usage found`,
-                            },
-                          ],
-                  })),
+            children: _.map(source.results, (results, eventName) => ({
+              name: eventName,
+              children:
+                _.size(results) > 0
+                  ? _.map(results, (result, matchFile) => ({
+                      name: `used in ${matchFile}: ${result.length}${
+                        result.length === 1 ? ' time' : ' times'
+                      }`,
+                    }))
+                  : [
+                      {
+                        name: `${logSymbols.error} no usage found`,
+                      },
+                    ],
+            })),
           })),
         );
 
-        const totalEvents = _.sumBy(sources, (source) => _.size(source.results));
-        const missingEvents = _.sumBy(sources, (source) => _.sum(
-          _.map(source.results, (results, eventName) => (_.size(results) > 0 ? 0 : 1)),
-        ));
+        const totalEvents = _.sumBy(sources, (source) =>
+          _.size(source.results),
+        );
+        const missingEvents = _.sumBy(sources, (source) =>
+          _.sum(
+            _.map(source.results, (results, eventName) =>
+              _.size(results) > 0 ? 0 : 1,
+            ),
+          ),
+        );
         if (missingEvents === 0) {
           if (totalEvents === 0) {
-            report.error('no events found in the avo file - please run avo pull');
+            report.error(
+              'no events found in the avo file - please run avo pull',
+            );
           } else {
             report.info(`${totalEvents} events seen in code`);
           }
         } else {
           report.info(
-            `${totalEvents
-              - missingEvents} of ${totalEvents} events seen in code`,
+            `${
+              totalEvents - missingEvents
+            } of ${totalEvents} events seen in code`,
           );
         }
         if (missingEvents > 0) {
           report.error(
-            `${missingEvents} missing ${missingEvents > 1 ? 'events' : 'event'}`,
+            `${missingEvents} missing ${
+              missingEvents > 1 ? 'events' : 'event'
+            }`,
           );
           report.tree(
             'missingEvents',
             sources.map((source) => ({
               name: `${source.name} (${source.path})`,
-              children:
-                    _.flatMap(source.results, (results, eventName) => (_.size(results) === 0
-                      ? [
-                        {
-                          name: `${red(eventName)}: no usage found`,
-                        },
-                      ]
-                      : [])),
+              children: _.flatMap(source.results, (results, eventName) =>
+                _.size(results) === 0
+                  ? [
+                      {
+                        name: `${red(eventName)}: no usage found`,
+                      },
+                    ]
+                  : [],
+              ),
             })),
           );
           process.exit(1);
@@ -1374,13 +1478,15 @@ yargs(hideBin(process.argv))
               cliAction: Avo.CliAction.INIT,
               cliInvokedByCi: invokedByCi(),
             });
-            return requireAuth(argv, () => init()
-              .then(writeAvoJson)
-              .then(() => {
-                report.info(
-                  "Run 'avo pull' to pull analytics wrappers from Avo",
-                );
-              }));
+            return requireAuth(argv, () =>
+              init()
+                .then(writeAvoJson)
+                .then(() => {
+                  report.info(
+                    "Run 'avo pull' to pull analytics wrappers from Avo",
+                  );
+                }),
+            );
           }
         })
         .catch(() => {
@@ -1399,10 +1505,11 @@ yargs(hideBin(process.argv))
   .command({
     command: 'pull [source]',
     desc: 'Pull analytics wrappers from Avo workspace',
-    builder: (yargs) => yargs.option('branch', {
-      describe: 'Name of Avo branch to pull from',
-      type: 'string',
-    }),
+    builder: (yargs) =>
+      yargs.option('branch', {
+        describe: 'Name of Avo branch to pull from',
+        type: 'string',
+      }),
     handler: (argv) => {
       loadAvoJsonOrInit({ argv })
         .then((json) => {
@@ -1422,7 +1529,9 @@ yargs(hideBin(process.argv))
                 .then(([source, json]) => pull(source, json));
             }
             report.info(`Pulling from branch '${json.branch.name}'`);
-            return getSource(argv, json).then(([source, json]) => pull(source, json));
+            return getSource(argv, json).then(([source, json]) =>
+              pull(source, json),
+            );
           });
         })
         .catch((error) => {
@@ -1443,32 +1552,35 @@ yargs(hideBin(process.argv))
     command: 'checkout [branch]',
     aliases: ['branch'],
     desc: 'Switch branches',
-    handler: (argv) => loadAvoJsonOrInit({ argv })
-      .then((json) => {
-        Avo.cliInvoked({
-          schemaId: json.schema.id,
-          schemaName: json.schema.name,
-          branchId: json.branch.id,
-          branchName: json.branch.name,
-          userId_: installIdOrUserId(),
-          cliAction: Avo.CliAction.CHECKOUT,
-          cliInvokedByCi: invokedByCi(),
-        });
-        report.info(`Currently on branch '${json.branch.name}'`);
-        requireAuth(argv, () => checkout(argv.branch, json).then(writeAvoJson));
-      })
-      .catch((error) => {
-        Avo.cliInvoked({
-          schemaId: 'N/A',
-          schemaName: 'N/A',
-          branchId: 'N/A',
-          branchName: 'N/A',
-          userId_: installIdOrUserId(),
-          cliAction: Avo.CliAction.CHECKOUT,
-          cliInvokedByCi: invokedByCi(),
-        });
-        throw error;
-      }),
+    handler: (argv) =>
+      loadAvoJsonOrInit({ argv })
+        .then((json) => {
+          Avo.cliInvoked({
+            schemaId: json.schema.id,
+            schemaName: json.schema.name,
+            branchId: json.branch.id,
+            branchName: json.branch.name,
+            userId_: installIdOrUserId(),
+            cliAction: Avo.CliAction.CHECKOUT,
+            cliInvokedByCi: invokedByCi(),
+          });
+          report.info(`Currently on branch '${json.branch.name}'`);
+          requireAuth(argv, () =>
+            checkout(argv.branch, json).then(writeAvoJson),
+          );
+        })
+        .catch((error) => {
+          Avo.cliInvoked({
+            schemaId: 'N/A',
+            schemaName: 'N/A',
+            branchId: 'N/A',
+            branchName: 'N/A',
+            userId_: installIdOrUserId(),
+            cliAction: Avo.CliAction.CHECKOUT,
+            cliInvokedByCi: invokedByCi(),
+          });
+          throw error;
+        }),
   })
   .command({
     command: 'source <command>',
@@ -1586,7 +1698,9 @@ yargs(hideBin(process.argv))
                 const getSource = () => {
                   if (argv.source) {
                     return Promise.resolve(
-                      _.find(json.sources, (source) => matchesSource(source, argv.source)),
+                      _.find(json.sources, (source) =>
+                        matchesSource(source, argv.source),
+                      ),
                     );
                   }
                   const choices = json.sources.map((source) => ({
@@ -1726,51 +1840,54 @@ yargs(hideBin(process.argv))
     command: 'conflict',
     aliases: ['resolve', 'conflicts'],
     desc: 'Resolve git conflicts in Avo files',
-    handler: (argv) => pify(fs.readFile)('avo.json', 'utf8')
-      .then((file) => {
-        if (hasMergeConflicts(file)) {
-          return requireAuth(argv, () => resolveAvoJsonConflicts(file, {
-            argv,
-          }).then((json) => {
-            Avo.cliInvoked({
-              schemaId: json.schema.id,
-              schemaName: json.schema.name,
-              branchId: json.branch.id,
-              branchName: json.branch.name,
-              userId_: installIdOrUserId(),
-              cliAction: Avo.CliAction.CONFLICT,
-              cliInvokedByCi: invokedByCi(),
-            });
-            pull(null, json);
-          }));
-        }
-        report.info(
-          "No git conflicts found in avo.json. Run 'avo pull' to resolve git conflicts in other Avo files.",
-        );
-        const json = JSON.parse(file);
-        Avo.cliInvoked({
-          schemaId: json.schema.id,
-          schemaName: json.schema.name,
-          branchId: json.branch.id,
-          branchName: json.branch.name,
-          userId_: installIdOrUserId(),
-          cliAction: Avo.CliAction.CONFLICT,
-          cliInvokedByCi: invokedByCi(),
-        });
-        return Promise.resolve(json);
-      })
-      .catch((error) => {
-        Avo.cliInvoked({
-          schemaId: 'N/A',
-          schemaName: 'N/A',
-          branchId: 'N/A',
-          branchName: 'N/A',
-          userId_: installIdOrUserId(),
-          cliAction: Avo.CliAction.CONFLICT,
-          cliInvokedByCi: invokedByCi(),
-        });
-        throw error;
-      }),
+    handler: (argv) =>
+      pify(fs.readFile)('avo.json', 'utf8')
+        .then((file) => {
+          if (hasMergeConflicts(file)) {
+            return requireAuth(argv, () =>
+              resolveAvoJsonConflicts(file, {
+                argv,
+              }).then((json) => {
+                Avo.cliInvoked({
+                  schemaId: json.schema.id,
+                  schemaName: json.schema.name,
+                  branchId: json.branch.id,
+                  branchName: json.branch.name,
+                  userId_: installIdOrUserId(),
+                  cliAction: Avo.CliAction.CONFLICT,
+                  cliInvokedByCi: invokedByCi(),
+                });
+                pull(null, json);
+              }),
+            );
+          }
+          report.info(
+            "No git conflicts found in avo.json. Run 'avo pull' to resolve git conflicts in other Avo files.",
+          );
+          const json = JSON.parse(file);
+          Avo.cliInvoked({
+            schemaId: json.schema.id,
+            schemaName: json.schema.name,
+            branchId: json.branch.id,
+            branchName: json.branch.name,
+            userId_: installIdOrUserId(),
+            cliAction: Avo.CliAction.CONFLICT,
+            cliInvokedByCi: invokedByCi(),
+          });
+          return Promise.resolve(json);
+        })
+        .catch((error) => {
+          Avo.cliInvoked({
+            schemaId: 'N/A',
+            schemaName: 'N/A',
+            branchId: 'N/A',
+            branchName: 'N/A',
+            userId_: installIdOrUserId(),
+            cliAction: Avo.CliAction.CONFLICT,
+            cliInvokedByCi: invokedByCi(),
+          });
+          throw error;
+        }),
   })
   .command({
     command: 'edit',
@@ -1893,7 +2010,7 @@ yargs(hideBin(process.argv))
           }
           report.log(msg);
         } else {
-          report.log('No need to logout, you\'re not logged in');
+          report.log("No need to logout, you're not logged in");
         }
       };
 
@@ -1974,34 +2091,14 @@ yargs(hideBin(process.argv))
 /// //////////////////////////////////////////////////////////////////////
 // AUTH
 
-function _haveValidAccessToken(refreshToken) {
-  if (_.isEmpty(lastAccessToken)) {
-    const tokens = conf.get('tokens');
-    if (refreshToken === _.get(tokens, 'refreshToken')) {
-      lastAccessToken = tokens;
-    }
-  }
-
-  return (
-    _.has(lastAccessToken, 'idToken')
-    && lastAccessToken.refreshToken === refreshToken
-    && _.has(lastAccessToken, 'expiresAt')
-    && lastAccessToken.expiresAt > Date.now() + FIFTEEN_MINUTES_IN_MS
-  );
-}
-
 function _getLoginUrl(callbackUrl) {
-  return (
-    `${api.authOrigin
-    }/auth/cli?${
-      _.map(
-        {
-          state: nonce,
-          redirect_uri: callbackUrl,
-        },
-        (v, k) => `${k}=${encodeURIComponent(v)}`,
-      ).join('&')}`
-  );
+  return `${api.authOrigin}/auth/cli?${_.map(
+    {
+      state: nonce,
+      redirect_uri: callbackUrl,
+    },
+    (v, k) => `${k}=${encodeURIComponent(v)}`,
+  ).join('&')}`;
 }
 
 function _loginWithLocalhost(port) {
@@ -2031,11 +2128,9 @@ function _loginWithLocalhost(port) {
               tokens,
             });
           })
-          .catch(() => _respondWithRedirect(
-            req,
-            res,
-            `${api.authOrigin}/auth/cli/error`,
-          ));
+          .catch(() =>
+            _respondWithRedirect(req, res, `${api.authOrigin}/auth/cli/error`),
+          );
       }
       _respondWithRedirect(req, res, `${api.authOrigin}/auth/cli/error`);
     });
