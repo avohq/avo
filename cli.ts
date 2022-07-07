@@ -1055,12 +1055,9 @@ function selectSource(sourceToAdd, json) {
     })
     .then((data: ApiSourcesResult) => {
       cancelWait();
-      const existingSources = data.sources ?? [];
+      const existingSources = json.sources ?? [];
       let sources = data.sources
-        .filter(
-          (source) =>
-            existingSources.find(({ id }) => source.id === id) === undefined,
-        )
+        .filter((source) => !existingSources.find(({ id }) => source.id === id))
         .sort((a, b) => {
           if (a.name < b.name) return -1;
           if (a.name > b.name) return 1;
@@ -2323,6 +2320,7 @@ process.on('unhandledRejection', (err) => {
     // @ts-ignore
     report.error(err.message);
   }
+  // @ts-ignore
   // console.error(err.stack);
 
   process.exit(1);
