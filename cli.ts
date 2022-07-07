@@ -1517,7 +1517,7 @@ function _getLoginUrl(callbackUrl) {
   )}&redirect_uri=${encodeURIComponent(callbackUrl)}`;
 }
 
-function _getCallbackUrl(port?: string) {
+function _getCallbackUrl(port?: number) {
   if (port === undefined) {
     return 'urn:ietf:wg:oauth:2.0:oob';
   }
@@ -1568,7 +1568,33 @@ function _loginWithoutLocalhost() {
   return open(authUrl);
 }
 
-function _loginWithLocalhost(port) {
+type LoginResult = {
+  user: {
+    cli: boolean;
+    iss: string;
+    aud: string;
+    auth_time: number;
+    user_id: string;
+    sub: string;
+    iat: number;
+    email: string;
+    email_verified: boolean;
+    firebase: {
+      identities: object;
+      sign_in_provider: string; // custom
+    };
+  };
+  tokens: {
+    expiresAt: number;
+    kind: string;
+    idToken: string;
+    refreshToken: string;
+    expiresIn: string;
+    isNewUser: boolean;
+  };
+};
+
+function _loginWithLocalhost(port: number) {
   return new Promise((resolve, reject) => {
     const callbackUrl = _getCallbackUrl(port);
     const authUrl = _getLoginUrl(callbackUrl);
@@ -2155,7 +2181,7 @@ yargs(hideBin(process.argv)) // eslint-disable-line no-unused-expressions
           return;
         }
         login()
-          .then((result) => {
+          .then((result: LoginResult) => {
             conf.set('user', result.user);
             conf.set('tokens', result.tokens);
 
