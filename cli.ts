@@ -1200,9 +1200,9 @@ function pull(sourceFilter, json) {
         report.error(
           `Branch ${result.branchName} was ${
             result.reason
-          } ${dateFns.distanceInWords(
-            new Date(result.closedAt),
+          } ${dateFns.formatDistance(
             new Date(),
+            new Date(result.closedAt),
           )} ago. Pick another branch.`,
         );
         checkout(null, json).then((data) => pull(sourceFilter, data));
