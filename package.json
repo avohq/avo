@@ -20,6 +20,7 @@
     "postinstall": "node cli.js track-install; true",
     "lint": "eslint cli.ts",
     "format": "prettier --write cli.ts",
+    "check-format": "prettier --check cli.ts",
     "compile": "tsc"
   },
   "files": [

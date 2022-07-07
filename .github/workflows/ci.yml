@@ -16,8 +16,8 @@ jobs:
     - name: Build TypeScript
       run: yarn compile
     - name: Check linting
-      run: yarn eslint cli.js
+      run: yarn lint
     - name: Check formatting
-      run: yarn prettier --check cli.js
+      run: yarn check-format
     - name: Check avo status
       run: node cli.js status
