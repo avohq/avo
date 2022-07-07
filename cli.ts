@@ -9,7 +9,7 @@ import inquirer from 'inquirer';
 import jwt from 'jsonwebtoken';
 import loadJsonFile from 'load-json-file';
 import logSymbols from 'log-symbols';
-import opn from 'opn';
+import open from 'open';
 import path from 'path';
 import pify from 'pify';
 import portfinder from 'portfinder';
@@ -1565,7 +1565,7 @@ function _loginWithoutLocalhost() {
 
   report.info(`Visit this URL on any device to login: ${new URL(authUrl)}`);
 
-  return opn(authUrl, { wait: false });
+  return open(authUrl, { wait: false });
 }
 
 function _loginWithLocalhost(port) {
@@ -1608,7 +1608,7 @@ function _loginWithLocalhost(port) {
       report.info(`Visit this URL on any device to login: ${link(authUrl)}`);
       wait('Waiting for authentication...');
 
-      opn(authUrl, { wait: false });
+      open(authUrl, { wait: false });
     });
 
     server.on('error', () => {
@@ -2128,7 +2128,7 @@ yargs(hideBin(process.argv)) // eslint-disable-line no-unused-expressions
           report.info(
             `Opening ${cyan(schema.name)} workspace in Avo: ${link(schemaUrl)}`,
           );
-          opn(schemaUrl, { wait: false });
+          open(schemaUrl, { wait: false });
         })
         .catch((error) => {
           Avo.cliInvoked({
