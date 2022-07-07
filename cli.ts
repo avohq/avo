@@ -46,11 +46,10 @@ const pkg = JSON.parse(
 );
 
 const { Minimatch } = minimatch;
-const cyan = chalk.cyan;
-const { cyan, gray, red, bold, underline } = chalk;
 
 /// //////////////////////////////////////////////////////////////////////
 // LOGGING
+const { cyan, gray, red, bold, underline } = chalk;
 
 function cmd(command) {
   return `${gray('`')}${cyan(command)}${gray('`')}`;
