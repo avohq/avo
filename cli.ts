@@ -1565,7 +1565,7 @@ function _loginWithoutLocalhost() {
 
   report.info(`Visit this URL on any device to login: ${new URL(authUrl)}`);
 
-  return open(authUrl, { wait: false });
+  return open(authUrl);
 }
 
 function _loginWithLocalhost(port) {
@@ -1608,7 +1608,7 @@ function _loginWithLocalhost(port) {
       report.info(`Visit this URL on any device to login: ${link(authUrl)}`);
       wait('Waiting for authentication...');
 
-      open(authUrl, { wait: false });
+      open(authUrl);
     });
 
     server.on('error', () => {
@@ -2128,7 +2128,7 @@ yargs(hideBin(process.argv)) // eslint-disable-line no-unused-expressions
           report.info(
             `Opening ${cyan(schema.name)} workspace in Avo: ${link(schemaUrl)}`,
           );
-          open(schemaUrl, { wait: false });
+          open(schemaUrl);
         })
         .catch((error) => {
           Avo.cliInvoked({
