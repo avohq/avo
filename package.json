@@ -45,7 +45,7 @@
     "node-avo-inspector": "^1.0.1",
     "open": "^8.4.0",
     "ora": "^6.0.1",
-    "pify": "^4.0.1",
+    "pify": "^6.0.0",
     "portfinder": "^1.0.28",
     "semver": "^7.3.7",
     "update-notifier": "^6.0.2",
