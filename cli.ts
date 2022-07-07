@@ -33,11 +33,20 @@ import fuzzypath from 'inquirer-fuzzy-path';
 
 import Avo from './Avo.js';
 
+declare global {
+  namespace NodeJS {
+    interface ImportMeta {
+      url: string;
+    }
+  }
+}
+
 const pkg = JSON.parse(
-  fs.readFileSync(new URL('package.json', import.meta.url)),
+  fs.readFileSync(new URL('package.json', import.meta.url), 'utf-8'),
 );
 
 const { Minimatch } = minimatch;
+const cyan = chalk.cyan;
 const { cyan, gray, red, bold, underline } = chalk;
 
 /// //////////////////////////////////////////////////////////////////////
@@ -125,10 +134,16 @@ const sum = (base, value) => base + value;
 portfinder.basePort = 9005;
 const _getPort = portfinder.getPortPromise;
 
-function AvoError(message, options = {}) {
+type ErrorOptions = {
+  status?: number;
+  exit?: number;
+  original?: Error;
+  context?: Object;
+};
+
+function AvoError(message, options: ErrorOptions = {}) {
   this.name = 'AvoError';
   this.message = message;
-  this.children = options.children ?? [];
   this.status = options.status ?? 500;
   this.exit = options.exit ?? 1;
   this.stack = new Error().stack;
@@ -144,11 +159,22 @@ const INVALID_CREDENTIAL_ERROR = new AvoError(
   { exit: 1 },
 );
 
+type ApiTokenResult = {
+  idToken?: string;
+  refreshToken?: string;
+  expiresIn: number;
+};
+
 // in-memory cache, so we have it for successive calls
-let lastAccessToken = {};
+type LastAccessToken = {
+  expiresAt?: number;
+  refreshToken?: string;
+  idToken?: string;
+};
+
+let lastAccessToken: LastAccessToken = {};
 let accessToken;
 let refreshToken;
-let commandScopes;
 
 /// //////////////////////////////////////////////////////////////////////
 // REQUEST HANDLING
@@ -244,7 +270,7 @@ function _refreshAccessToken(refreshToken) {
       },
     })
     .then(
-      (data) => {
+      (data: ApiTokenResult) => {
         if (!isString(data.idToken)) {
           throw INVALID_CREDENTIAL_ERROR;
         }
@@ -291,6 +317,15 @@ function getAccessToken(refreshToken) {
   return _refreshAccessToken(refreshToken);
 }
 
+type ReqOptions = {
+  method: string;
+  decompress: boolean;
+  headers: object; // Should be stricter
+  json?: object;
+  form?: object; // Is it?
+  url?: string;
+};
+
 const api = {
   authOrigin: 'https://www.avo.app',
 
@@ -305,7 +340,7 @@ const api = {
   getAccessToken() {
     return accessToken
       ? Promise.resolve({ idToken: accessToken })
-      : getAccessToken(refreshToken, commandScopes);
+      : getAccessToken(refreshToken);
   },
   addRequestHeaders(reqOptions) {
     // Runtime fetch of Auth singleton to prevent circular module dependencies
@@ -322,7 +357,7 @@ const api = {
   request(method, resource, options) {
     const validMethods = ['GET', 'PUT', 'POST', 'DELETE', 'PATCH'];
 
-    const reqOptions = {
+    const reqOptions: ReqOptions = {
       method: validMethods.includes(method) ? method : 'GET',
       decompress: true,
       headers: options.headers ?? {},
@@ -582,6 +617,10 @@ function requireAuth(argv, cb) {
   return cb();
 }
 
+type ApiWorkspacesResult = {
+  workspaces: [{ lastUsedAt: number; name: string }];
+};
+
 function init() {
   const makeAvoJson = (schema) => {
     report.success(`Initialized for workspace ${cyan(schema.name)}`);
@@ -606,7 +645,7 @@ function init() {
       origin: api.apiOrigin,
       auth: true,
     })
-    .then(({ workspaces }) => {
+    .then(({ workspaces }: ApiWorkspacesResult) => {
       cancelWait();
       const schemas = [...workspaces].sort(
         (a, b) => a.lastUsedAt - b.lastUsedAt,
@@ -653,6 +692,10 @@ function validateAvoJson(json) {
   return { ...json, avo: { ...json.avo, version: semver.major(pkg.version) } };
 }
 
+type ApiBranchesResult = {
+  branches: [{ name: string; id: string }];
+};
+
 function fetchBranches(json) {
   wait('Fetching open branches');
   const payload = {
@@ -662,19 +705,21 @@ function fetchBranches(json) {
       schemaId: json.schema.id,
     },
   };
-  return api.request('POST', '/c/v1/branches', payload).then((data) => {
-    cancelWait();
-    const branches = [...data.branches].sort((a, b) => {
-      if (a.name < b.name) return -1;
-      if (a.name > b.name) return 1;
-      return 0;
+  return api
+    .request('POST', '/c/v1/branches', payload)
+    .then((data: ApiBranchesResult) => {
+      cancelWait();
+      const branches = [...data.branches].sort((a, b) => {
+        if (a.name < b.name) return -1;
+        if (a.name > b.name) return 1;
+        return 0;
+      });
+      // The api still returns master for backwards comparability so we manually
+      // update the branch name to main
+      return branches.map((branch) =>
+        branch.name === 'master' ? { ...branch, name: 'main' } : branch,
+      );
     });
-    // The api still returns master for backwards comparability so we manually
-    // update the branch name to main
-    return branches.map((branch) =>
-      branch.name === 'master' ? { ...branch, name: 'main' } : branch,
-    );
-  });
 }
 
 function checkout(branchToCheckout, json) {
@@ -935,12 +980,8 @@ function writeAvoJson(json) {
   }).then(() => json);
 }
 
-function codegen(json, result) {
-  const { schema } = result;
-  const targets = result.sources;
+function codegen(json, { schema, sources: targets, warnings, errors }) {
   const newJson = { ...JSON.parse(JSON.stringify(json)), schema };
-  const { warnings } = result;
-  const { errors } = result;
 
   newJson.sources = newJson.sources.map((source) => {
     const target = targets.find(({ id }) => id === source.id);
@@ -999,6 +1040,10 @@ function matchesSource(source, filter) {
   return source.name.toLowerCase() === filter.toLowerCase();
 }
 
+type ApiSourcesResult = {
+  sources: [{ id: string; name: string; filenameHint: string }];
+};
+
 function selectSource(sourceToAdd, json) {
   wait('Fetching sources');
   return api
@@ -1010,7 +1055,7 @@ function selectSource(sourceToAdd, json) {
         branchId: json.branch.id,
       },
     })
-    .then((data) => {
+    .then((data: ApiSourcesResult) => {
       cancelWait();
       const existingSources = data.sources ?? [];
       let sources = data.sources
@@ -1107,6 +1152,17 @@ function selectSource(sourceToAdd, json) {
     });
 }
 
+type ApiPullResult = {
+  ok: boolean;
+  branchName: string;
+  reason: string;
+  closedAt: string; // Datestring
+  sources: [];
+  warnings: object;
+  errors: object;
+  schema: object;
+};
+
 function pull(sourceFilter, json) {
   const sources = sourceFilter
     ? [json.sources.find((source) => matchesSource(source, sourceFilter))]
@@ -1138,7 +1194,7 @@ function pull(sourceFilter, json) {
         },
       }),
     )
-    .then((result) => {
+    .then((result: ApiPullResult) => {
       cancelWait();
       if (result.ok) {
         codegen(json, result);
@@ -1463,12 +1519,14 @@ function _getLoginUrl(callbackUrl) {
   )}&redirect_uri=${encodeURIComponent(callbackUrl)}`;
 }
 
-function _getCallbackUrl(port) {
+function _getCallbackUrl(port?: string) {
   if (port === undefined) {
     return 'urn:ietf:wg:oauth:2.0:oob';
   }
   return `http://localhost:${port}`;
 }
+
+
 
 function _getTokensFromAuthorizationCode(code, callbackUrl) {
   return api
@@ -1480,7 +1538,7 @@ function _getTokensFromAuthorizationCode(code, callbackUrl) {
       },
     })
     .then(
-      (data) => {
+      (data: ApiTokenResult) => {
         if (!data.idToken && !data.refreshToken) {
           throw INVALID_CREDENTIAL_ERROR;
         }
@@ -1497,7 +1555,7 @@ function _getTokensFromAuthorizationCode(code, callbackUrl) {
 }
 
 function _respondWithRedirect(req, res, Location) {
-  return new Promise((resolve) => {
+  return new Promise<void>((resolve) => {
     res.writeHead(302, { Location });
     res.end();
     req.socket.destroy();
@@ -1509,9 +1567,9 @@ function _loginWithoutLocalhost() {
   const callbackUrl = _getCallbackUrl();
   const authUrl = _getLoginUrl(callbackUrl);
 
-  report.info(`Visit this URL on any device to login: ${url(authUrl)}`);
+  report.info(`Visit this URL on any device to login: ${new URL(authUrl)}`);
 
-  opn(authUrl, { wait: false });
+  return opn(authUrl, { wait: false });
 }
 
 function _loginWithLocalhost(port) {
@@ -1535,7 +1593,7 @@ function _loginWithLocalhost(port) {
           })
           .then(() => {
             cancelWait();
-            server.shutdown();
+            server.close();
             return resolve({
               user: jwt.decode(tokens.idToken),
               tokens,
@@ -1609,7 +1667,7 @@ yargs(hideBin(process.argv)) // eslint-disable-line no-unused-expressions
     command: 'init',
     desc: 'Initialize an Avo workspace in the current folder',
     handler: (argv) => {
-      loadAvoJsonOrInit({ argv, skipInit: true })
+      loadAvoJsonOrInit({ argv, skipPullMaster: false, skipInit: true })
         .then((json) => {
           if (json) {
             Avo.cliInvoked({
@@ -1670,7 +1728,7 @@ yargs(hideBin(process.argv)) // eslint-disable-line no-unused-expressions
         type: 'string',
       }),
     handler: (argv) => {
-      loadAvoJsonOrInit({ argv })
+      loadAvoJsonOrInit({ argv, skipInit: false, skipPullMaster: false })
         .then((json) => {
           Avo.cliInvoked({
             schemaId: json.schema.id,
@@ -1712,7 +1770,7 @@ yargs(hideBin(process.argv)) // eslint-disable-line no-unused-expressions
     aliases: ['branch'],
     desc: 'Switch branches',
     handler: (argv) =>
-      loadAvoJsonOrInit({ argv })
+      loadAvoJsonOrInit({ argv, skipInit: false, skipPullMaster: false })
         .then((json) => {
           Avo.cliInvoked({
             schemaId: json.schema.id,
@@ -1750,7 +1808,7 @@ yargs(hideBin(process.argv)) // eslint-disable-line no-unused-expressions
           command: '$0',
           desc: 'List sources in this project',
           handler: (argv) => {
-            loadAvoJsonOrInit({ argv })
+            loadAvoJsonOrInit({ argv, skipInit: false, skipPullMaster: false })
               .then((json) => {
                 Avo.cliInvoked({
                   schemaId: json.schema.id,
@@ -1798,7 +1856,7 @@ yargs(hideBin(process.argv)) // eslint-disable-line no-unused-expressions
           command: 'add [source]',
           desc: 'Add a source to this project',
           handler: (argv) => {
-            loadAvoJsonOrInit({ argv })
+            loadAvoJsonOrInit({ argv, skipInit: false, skipPullMaster: false })
               .then((json) => {
                 Avo.cliInvoked({
                   schemaId: json.schema.id,
@@ -1833,7 +1891,7 @@ yargs(hideBin(process.argv)) // eslint-disable-line no-unused-expressions
           aliases: ['rm'],
           desc: 'Remove a source from this project',
           handler: (argv) => {
-            loadAvoJsonOrInit({ argv })
+            loadAvoJsonOrInit({ argv, skipInit: false, skipPullMaster: false })
               .then((json) => {
                 Avo.cliInvoked({
                   schemaId: json.schema.id,
@@ -1854,7 +1912,7 @@ yargs(hideBin(process.argv)) // eslint-disable-line no-unused-expressions
                   return;
                 }
 
-                const getSourceToRemove = () => {
+                const getSourceToRemove = (argv, json) => {
                   if (argv.source) {
                     return Promise.resolve(
                       json.sources.find((source) =>
@@ -1935,7 +1993,7 @@ yargs(hideBin(process.argv)) // eslint-disable-line no-unused-expressions
     command: 'status [source]',
     desc: 'Show the status of the Avo implementation',
     handler: (argv) => {
-      loadAvoJsonOrInit({ argv })
+      loadAvoJsonOrInit({ argv, skipInit: false, skipPullMaster: false })
         .then((json) => {
           Avo.cliInvoked({
             schemaId: json.schema.id,
@@ -1970,7 +2028,7 @@ yargs(hideBin(process.argv)) // eslint-disable-line no-unused-expressions
     aliases: ['merge master'],
     desc: 'Pull the Avo main branch into your current branch',
     handler: (argv) => {
-      loadAvoJsonOrInit({ argv, skipPullMaster: true })
+      loadAvoJsonOrInit({ argv, skipPullMaster: true, skipInit: false })
         .then((json) => {
           Avo.cliInvoked({
             schemaId: json.schema.id,
@@ -2010,6 +2068,7 @@ yargs(hideBin(process.argv)) // eslint-disable-line no-unused-expressions
             return requireAuth(argv, () =>
               resolveAvoJsonConflicts(avoFile, {
                 argv,
+                skipPullMaster: false,
               }).then((json) => {
                 Avo.cliInvoked({
                   schemaId: json.schema.id,
@@ -2056,7 +2115,7 @@ yargs(hideBin(process.argv)) // eslint-disable-line no-unused-expressions
     command: 'edit',
     desc: 'Open the Avo workspace in your browser',
     handler: (argv) => {
-      loadAvoJsonOrInit({ argv })
+      loadAvoJsonOrInit({ argv, skipInit: false, skipPullMaster: false })
         .then((json) => {
           Avo.cliInvoked({
             schemaId: json.schema.id,
