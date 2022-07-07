@@ -23,7 +23,7 @@ import util from 'util';
 import { v4 as uuidv4 } from 'uuid';
 import walk from 'ignore-walk';
 import writeFile from 'write';
-import writeJsonFile from 'write-json-file';
+import { writeJsonFile } from 'write-json-file';
 import Configstore from 'configstore';
 import Inspector from 'node-avo-inspector';
 import yargs from 'yargs';
