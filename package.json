@@ -18,8 +18,8 @@
   },
   "scripts": {
     "postinstall": "node cli.js track-install",
-    "lint": "eslint cli.js",
-    "format": "prettier --write cli.js",
+    "lint": "eslint cli.ts",
+    "format": "prettier --write cli.ts",
     "compile": "tsc"
   },
   "files": [
@@ -27,6 +27,8 @@
     "Avo.js"
   ],
   "dependencies": {
+    "@typescript-eslint/eslint-plugin": "^5.30.5",
+    "@typescript-eslint/parser": "^5.30.5",
     "chalk": "^5.0.1",
     "configstore": "^4.0.0",
     "date-fns": "^1.30.1",
