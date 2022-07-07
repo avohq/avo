@@ -9,7 +9,7 @@ import inquirer from 'inquirer';
 import jwt from 'jsonwebtoken';
 import loadJsonFile from 'load-json-file';
 import logSymbols from 'log-symbols';
-import opn from 'opn';
+import open from 'open';
 import path from 'path';
 import pify from 'pify';
 import portfinder from 'portfinder';
@@ -1517,7 +1517,7 @@ function _getLoginUrl(callbackUrl) {
   )}&redirect_uri=${encodeURIComponent(callbackUrl)}`;
 }
 
-function _getCallbackUrl(port?: string) {
+function _getCallbackUrl(port?: number) {
   if (port === undefined) {
     return 'urn:ietf:wg:oauth:2.0:oob';
   }
@@ -1565,10 +1565,36 @@ function _loginWithoutLocalhost() {
 
   report.info(`Visit this URL on any device to login: ${new URL(authUrl)}`);
 
-  return opn(authUrl, { wait: false });
+  return open(authUrl);
 }
 
-function _loginWithLocalhost(port) {
+type LoginResult = {
+  user: {
+    cli: boolean;
+    iss: string;
+    aud: string;
+    auth_time: number;
+    user_id: string;
+    sub: string;
+    iat: number;
+    email: string;
+    email_verified: boolean;
+    firebase: {
+      identities: object;
+      sign_in_provider: string; // custom
+    };
+  };
+  tokens: {
+    expiresAt: number;
+    kind: string;
+    idToken: string;
+    refreshToken: string;
+    expiresIn: string;
+    isNewUser: boolean;
+  };
+};
+
+function _loginWithLocalhost(port: number) {
   return new Promise((resolve, reject) => {
     const callbackUrl = _getCallbackUrl(port);
     const authUrl = _getLoginUrl(callbackUrl);
@@ -1608,7 +1634,7 @@ function _loginWithLocalhost(port) {
       report.info(`Visit this URL on any device to login: ${link(authUrl)}`);
       wait('Waiting for authentication...');
 
-      opn(authUrl, { wait: false });
+      open(authUrl);
     });
 
     server.on('error', () => {
@@ -2128,7 +2154,7 @@ yargs(hideBin(process.argv)) // eslint-disable-line no-unused-expressions
           report.info(
             `Opening ${cyan(schema.name)} workspace in Avo: ${link(schemaUrl)}`,
           );
-          opn(schemaUrl, { wait: false });
+          open(schemaUrl);
         })
         .catch((error) => {
           Avo.cliInvoked({
@@ -2155,7 +2181,7 @@ yargs(hideBin(process.argv)) // eslint-disable-line no-unused-expressions
           return;
         }
         login()
-          .then((result) => {
+          .then((result: LoginResult) => {
             conf.set('user', result.user);
             conf.set('tokens', result.tokens);
 
