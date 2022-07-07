@@ -13,9 +13,11 @@ jobs:
         cache: 'yarn'
     - name: Install modules
       run: yarn install --immutable
-    - name: Run ESLint
+    - name: Build TypeScript
+      run: yarn compile
+    - name: Check linting
       run: yarn eslint cli.js
-    - name: Run Prettier
+    - name: Check formatting
       run: yarn prettier --check cli.js
-    - name: Avo status
+    - name: Check avo status
       run: node cli.js status
