@@ -7,7 +7,7 @@ import fs from 'fs';
 import http from 'http';
 import inquirer from 'inquirer';
 import jwt from 'jsonwebtoken';
-import loadJsonFile from 'load-json-file';
+import { loadJsonFile } from 'load-json-file';
 import logSymbols from 'log-symbols';
 import open from 'open';
 import path from 'path';
