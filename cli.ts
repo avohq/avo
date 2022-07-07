@@ -233,12 +233,11 @@ function responseToError(response) {
 function _request(options) {
   return new Promise((resolve, reject) => {
     got(options)
-      .json()
       .then((response) => {
         if (response.statusCode >= 400) {
           return reject(responseToError(response));
         }
-        return resolve(response);
+        return resolve(JSON.parse(response.body));
       })
       .catch((err) =>
         reject(
@@ -1094,6 +1093,7 @@ function selectSource(sourceToAdd, json) {
           type: 'list',
           name: 'source',
           message: 'Select a source to set up',
+          // @ts-ignore
           choices,
           pageSize: 15,
         });
@@ -1101,6 +1101,7 @@ function selectSource(sourceToAdd, json) {
           type: 'input',
           name: 'filename',
           message: 'Select a filename for the analytics wrapper',
+          // @ts-ignore
           default(answers) {
             return answers.source.filenameHint;
           },
@@ -1116,6 +1117,7 @@ function selectSource(sourceToAdd, json) {
           type: 'input',
           name: 'filename',
           message: 'Select a filename for the library',
+          // @ts-ignore
           default() {
             return source.filenameHint;
           },
@@ -1524,8 +1526,6 @@ function _getCallbackUrl(port?: string) {
   }
   return `http://localhost:${port}`;
 }
-
-
 
 function _getTokensFromAuthorizationCode(code, callbackUrl) {
   return api
@@ -2320,6 +2320,7 @@ process.on('unhandledRejection', (err) => {
       new AvoError(`Promise rejected with value: ${util.inspect(err)}`),
     );
   } else {
+    // @ts-ignore
     report.error(err.message);
   }
   // console.error(err.stack);
