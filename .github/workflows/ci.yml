@@ -15,9 +15,30 @@ jobs:
         run: yarn install --immutable
       - name: Build TypeScript
         run: yarn compile
+
+  check-lint:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - uses: actions/setup-node@v3
       - name: Check linting
         run: yarn lint
+
+  check-format:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - uses: actions/setup-node@v3
       - name: Check formatting
         run: yarn check-format
+
+  check-avo-status:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - uses: actions/setup-node@v3
       - name: Check avo status
         run: node cli.js status
