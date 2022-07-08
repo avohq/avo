@@ -329,7 +329,7 @@ function _avo_invoke_payload(body: object) {
 _avo_invoke = function _avo_invoke(env: string, eventId: string, hash: string, messages: {tag: string, propertyId: string}[], origin: string) {
   try {
     _avo_invoke_payload({
-      "ac": "U4a4TSJXCxaOuqumiD5Y",
+      "ac": "4w4Edo4vvDYa05xVMgwm",
       "br": "ZbBYeviBz",
       "en": env,
       "ev": eventId,
@@ -347,7 +347,7 @@ _avo_invoke = function _avo_invoke(env: string, eventId: string, hash: string, m
 _avo_invoke_meta = function _avo_invoke_meta(env: string, type: string, messages: {tag: string, propertyId: string}[], origin: string) {
   try {
     _avo_invoke_payload({
-      "ac": "U4a4TSJXCxaOuqumiD5Y",
+      "ac": "4w4Edo4vvDYa05xVMgwm",
       "br": "ZbBYeviBz",
       "en": env,
       "ty": type,
@@ -392,6 +392,7 @@ export const AuthenticationMethod = {
   'GOOGLE': 'Google',
   'EMAIL': 'Email',
   'SSO': 'SSO',
+  'CLI': 'CLI',
 } as const;
 export type AuthenticationMethodType = typeof AuthenticationMethod;
 export type AuthenticationMethodValueType = AuthenticationMethodType[keyof AuthenticationMethodType];
@@ -523,7 +524,7 @@ export function signedIn(properties: SignedInProperties) {
     let messages: AvoAssertMessage[] = [];
     // debug console in Avo
     if (!__AVO_NOOP__) {
-      _avo_invoke(__AVO_ENV__, "54e92613-090c-4f0b-afeb-ed720eff3422", "2fec10106ad560f43f307ffdc820e3bd7a474585f9c62ee39961730c35694cb1", messages.map(m => Object.assign({}, {tag: m.tag, propertyId: m.propertyId, additionalProperties: m.additionalProperties, actualType: m.actualType})), 'event');
+      _avo_invoke(__AVO_ENV__, "54e92613-090c-4f0b-afeb-ed720eff3422", "a1718f3b64ff5fb6ebf7227dac25c5ab3f8c0cfecf4cc395076adfab2326fcae", messages.map(m => Object.assign({}, {tag: m.tag, propertyId: m.propertyId, additionalProperties: m.additionalProperties, actualType: m.actualType})), 'event');
     }
     InternalAvoLogger.logEventSent("Signed In", {
       "Authentication Method": properties.authenticationMethod,
@@ -553,7 +554,7 @@ export function signedIn(properties: SignedInProperties) {
         "Authentication Method": properties.authenticationMethod,
         "Client": sysClient,
         "Version": sysVersion,
-        }, "54e92613-090c-4f0b-afeb-ed720eff3422", "2fec10106ad560f43f307ffdc820e3bd7a474585f9c62ee39961730c35694cb1")
+        }, "54e92613-090c-4f0b-afeb-ed720eff3422", "a1718f3b64ff5fb6ebf7227dac25c5ab3f8c0cfecf4cc395076adfab2326fcae")
       : Promise.resolve(),
       // destination CustomNodeJS
       CustomNodeJS.setUserProperties(properties.userId_, (Object as any).assign({}, userPropertiesCustomNodeJS)),
@@ -725,7 +726,7 @@ export interface CliInstalledProperties {
   cliInvokedByCi: boolean;
 }
 /**
- * Cli Installed: Event sent when the CLI is successfully installed.
+ * Cli Installed: Event sent when the CLI is successfully installed
  *
  * @param properties the properties associatied with this event
  * @param properties.userId_: User Id is required for server sources.

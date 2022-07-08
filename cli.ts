@@ -32,7 +32,6 @@ import httpShutdown from 'http-shutdown';
 import fuzzypath from 'inquirer-fuzzy-path';
 
 import Avo from './Avo.js';
-import type { AuthenticationMethodValueType } from './Avo.js';
 
 declare global {
   namespace NodeJS {
@@ -1573,21 +1572,6 @@ function _loginWithoutLocalhost() {
 
 type FirebaseSignInProvider = 'custom' | 'google.com' | 'password';
 
-const firebaseSignInProviderToAuthenticationMethod = (
-  signInProvider: FirebaseSignInProvider,
-): AuthenticationMethodValueType => {
-  switch (signInProvider) {
-    case 'custom':
-      return Avo.AuthenticationMethod.SSO;
-    case 'password':
-      return Avo.AuthenticationMethod.EMAIL;
-    case 'google.com':
-      return Avo.AuthenticationMethod.GOOGLE;
-    default:
-      return undefined;
-  }
-};
-
 type LoginResult = {
   user: {
     cli: boolean;
@@ -2229,10 +2213,7 @@ yargs(hideBin(process.argv)) // eslint-disable-line no-unused-expressions
             Avo.signedIn({
               userId_: result.user.user_id,
               email: result.user.email,
-              authenticationMethod:
-                firebaseSignInProviderToAuthenticationMethod(
-                  result.user.firebase.sign_in_provider,
-                ),
+              authenticationMethod: Avo.AuthenticationMethod.CLI,
             });
 
             report.success(`Logged in as ${email(result.user.email)}`);
