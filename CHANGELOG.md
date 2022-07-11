@@ -1,5 +1,9 @@
 ## Unreleased
 
+## 3.0.0-beta.2
+
+* CodeGen Avo Functions as TypeScript for stronger typing
+
 ## 3.0.0-beta.1
 
 This is mainly a security and hardening update and it includes no new or modified functionality. The only breaking change is a requirement for Node >= 14.16. If you are unable to match that, the last version of avo will continue to work.
