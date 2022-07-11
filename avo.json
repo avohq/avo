@@ -1,24 +1,24 @@
 {
   "avo": {
-    "version": 1
+    "version": 3
   },
   "schema": {
     "id": "fwtXqAc0fCLy7b7oGW40",
     "name": "Avo"
   },
   "branch": {
-    "id": "master",
-    "name": "main"
+    "id": "ZbBYeviBz",
+    "name": "typescript-cli"
   },
-  "force": false,
+  "force": true,
   "sources": [
     {
       "id": "xOUFa-ew2",
       "name": "Cli",
-      "path": "Avo.js",
-      "actionId": "0PwMjPaMtkOkKQpGoQev",
-      "branchId": "master",
-      "updatedAt": "2021-11-14T18:50:05.501Z"
+      "path": "Avo.ts",
+      "actionId": "4w4Edo4vvDYa05xVMgwm",
+      "branchId": "ZbBYeviBz",
+      "updatedAt": "2022-07-08T00:07:35.658Z"
     }
   ]
 }
