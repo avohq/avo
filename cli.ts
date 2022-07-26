@@ -958,7 +958,7 @@ function loadAvoJsonOrInit({ argv, skipPullMaster, skipInit }) {
       }
       return Promise.resolve(JSON.parse(avoFile));
     })
-    .then((json) => Promise.resolve({ ...json, force: argv.f === true }))
+    .then((json) => Promise.resolve({ ...json, force: argv.f === true, forceFeatures: argv.forceFeatures }))
     .then(validateAvoJson)
     .catch((error) => {
       if (error.code === 'ENOENT' && skipInit) {
@@ -980,7 +980,7 @@ function writeAvoJson(json) {
   }).then(() => json);
 }
 
-function codegen(json, { schema, sources: targets, warnings, errors }) {
+function codegen(json, { schema, sources: targets, warnings, success, errors }) {
   const newJson = { ...JSON.parse(JSON.stringify(json)), schema };
 
   newJson.sources = newJson.sources.map((source) => {
@@ -1019,6 +1019,16 @@ function codegen(json, { schema, sources: targets, warnings, errors }) {
         report.warn(warning);
       });
     }
+    if (
+      success !== undefined &&
+      success !== null &&
+      Array.isArray(success)
+    ) {
+      success.forEach((success) => {
+        report.success(success);
+      });
+    }
+    
     report.success(
       `Analytics ${
         targets.length > 1 ? 'wrappers' : 'wrapper'
@@ -1159,6 +1169,7 @@ type ApiPullResult = {
   closedAt: string; // Datestring
   sources: [];
   warnings: object;
+  success: object;
   errors: object;
   schema: object;
 };
@@ -1191,6 +1202,7 @@ function pull(sourceFilter, json) {
             path: source.path,
           })),
           force: json.force ?? false,
+          forceFeatures: json.forceFeatures
         },
       }),
     )
