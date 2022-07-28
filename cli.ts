@@ -239,14 +239,15 @@ function _request(options) {
         }
         return resolve(JSON.parse(response.body));
       })
-      .catch((err) =>
+      .catch((err) => {
+        report.error(`${responseToError(err.response)}\n`);
         reject(
           new AvoError(`Server Error. ${err.message}`, {
             original: err,
             exit: 2,
           }),
-        ),
-      );
+        );
+      });
   });
 }
 
