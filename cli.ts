@@ -1668,7 +1668,7 @@ function logout(refreshToken) {
 }
 
 function parseForceFeaturesParam(forceFeatures: string | undefined): string[] {
-  return forceFeatures?.split(",").map((it) => { return it.trim() })
+  return forceFeatures?.split(",").map((it) => it.trim())
 }
 
 yargs(hideBin(process.argv)) // eslint-disable-line no-unused-expressions
@@ -2091,12 +2091,6 @@ yargs(hideBin(process.argv)) // eslint-disable-line no-unused-expressions
         });
     },
   })
-  /*  .option('f', {
-    alias: 'force',
-    describe: 'Proceed with merge when incoming branch is open or pull when there are unsupported features',
-    default: false,
-    type: 'boolean',
-  })*/
   .command({
     command: 'merge main',
     aliases: ['merge master'],
