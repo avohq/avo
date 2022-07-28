@@ -1,5 +1,9 @@
 ## Unreleased
 
+## 3.1.0 (2022-07-28)
+
+Added a 'forceFeatures' flag to the 'avo pull' command. You can provide a comma separated list of features you'd like to force enable.
+
 ## 3.0.0 (2022-07-06)
 
 This is mainly a security update and it includes no new or modified functionality. The only breaking change is a requirement for Node >= 14.16. If you are unable to match that, the last version of avo will continue to work.

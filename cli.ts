@@ -958,7 +958,13 @@ function loadAvoJsonOrInit({ argv, skipPullMaster, skipInit }) {
       }
       return Promise.resolve(JSON.parse(avoFile));
     })
-    .then((json) => Promise.resolve({ ...json, force: argv.f === true }))
+    .then((json) =>
+      Promise.resolve({
+        ...json,
+        force: argv.f === true,
+        forceFeatures: argv.forceFeatures,
+      }),
+    )
     .then(validateAvoJson)
     .catch((error) => {
       if (error.code === 'ENOENT' && skipInit) {
@@ -980,7 +986,10 @@ function writeAvoJson(json) {
   }).then(() => json);
 }
 
-function codegen(json, { schema, sources: targets, warnings, errors }) {
+function codegen(
+  json,
+  { schema, sources: targets, warnings, success, errors },
+) {
   const newJson = { ...JSON.parse(JSON.stringify(json)), schema };
 
   newJson.sources = newJson.sources.map((source) => {
@@ -1019,6 +1028,12 @@ function codegen(json, { schema, sources: targets, warnings, errors }) {
         report.warn(warning);
       });
     }
+    if (success !== undefined && success !== null && Array.isArray(success)) {
+      success.forEach((success) => {
+        report.success(success);
+      });
+    }
+
     report.success(
       `Analytics ${
         targets.length > 1 ? 'wrappers' : 'wrapper'
@@ -1159,6 +1174,7 @@ type ApiPullResult = {
   closedAt: string; // Datestring
   sources: [];
   warnings: object;
+  success: object;
   errors: object;
   schema: object;
 };
@@ -1191,6 +1207,7 @@ function pull(sourceFilter, json) {
             path: source.path,
           })),
           force: json.force ?? false,
+          forceFeatures: json.forceFeatures,
         },
       }),
     )
@@ -1663,6 +1680,10 @@ function logout(refreshToken) {
   }
 }
 
+function parseForceFeaturesParam(forceFeatures: string | undefined): string[] {
+  return forceFeatures?.split(',').map((it) => it.trim());
+}
+
 yargs(hideBin(process.argv)) // eslint-disable-line no-unused-expressions
   .usage('$0 command')
   .scriptName('avo')
@@ -1671,12 +1692,6 @@ yargs(hideBin(process.argv)) // eslint-disable-line no-unused-expressions
     alias: 'verbose',
     default: false,
     describe: 'make output more verbose',
-    type: 'boolean',
-  })
-  .option('f', {
-    alias: 'force',
-    describe: 'Proceed with merge when incoming branch is open',
-    default: false,
     type: 'boolean',
   })
   .command({
@@ -1705,6 +1720,7 @@ yargs(hideBin(process.argv)) // eslint-disable-line no-unused-expressions
               cliAction: Avo.CliAction.INIT,
               cliInvokedByCi: invokedByCi(),
               force: undefined,
+              forceFeatures: undefined,
             });
             report.info(
               `Avo is already initialized for workspace ${cyan(
@@ -1723,6 +1739,7 @@ yargs(hideBin(process.argv)) // eslint-disable-line no-unused-expressions
             cliAction: Avo.CliAction.INIT,
             cliInvokedByCi: invokedByCi(),
             force: undefined,
+            forceFeatures: undefined,
           });
           return requireAuth(argv, () =>
             init()
@@ -1744,6 +1761,7 @@ yargs(hideBin(process.argv)) // eslint-disable-line no-unused-expressions
             cliAction: Avo.CliAction.INIT,
             cliInvokedByCi: invokedByCi(),
             force: undefined,
+            forceFeatures: undefined,
           });
         });
     },
@@ -1752,10 +1770,24 @@ yargs(hideBin(process.argv)) // eslint-disable-line no-unused-expressions
     command: 'pull [source]',
     desc: 'Pull analytics wrappers from Avo workspace',
     builder: (yargs) =>
-      yargs.option('branch', {
-        describe: 'Name of Avo branch to pull from',
-        type: 'string',
-      }),
+      yargs
+        .option('branch', {
+          describe: 'Name of Avo branch to pull from',
+          default: 'main',
+          type: 'string',
+        })
+        .option('f', {
+          alias: 'force',
+          describe:
+            'Proceed ignoring the unsupported features for given source',
+          default: false,
+          type: 'boolean',
+        })
+        .option('forceFeatures', {
+          describe: 'Optional comma separated list of features to force enable',
+          default: undefined,
+          type: 'string',
+        }),
     handler: (argv) => {
       loadAvoJsonOrInit({ argv, skipInit: false, skipPullMaster: false })
         .then((json) => {
@@ -1767,7 +1799,8 @@ yargs(hideBin(process.argv)) // eslint-disable-line no-unused-expressions
             userId_: installIdOrUserId(),
             cliAction: Avo.CliAction.PULL,
             cliInvokedByCi: invokedByCi(),
-            force: undefined,
+            force: argv.f === true,
+            forceFeatures: parseForceFeaturesParam(argv.forceFeatures),
           });
           requireAuth(argv, () => {
             if (argv.branch && json.branch.name !== argv.branch) {
@@ -1791,6 +1824,7 @@ yargs(hideBin(process.argv)) // eslint-disable-line no-unused-expressions
             cliAction: Avo.CliAction.PULL,
             cliInvokedByCi: invokedByCi(),
             force: undefined,
+            forceFeatures: undefined,
           });
           throw error;
         });
@@ -1812,6 +1846,7 @@ yargs(hideBin(process.argv)) // eslint-disable-line no-unused-expressions
             cliAction: Avo.CliAction.CHECKOUT,
             cliInvokedByCi: invokedByCi(),
             force: undefined,
+            forceFeatures: undefined,
           });
           report.info(`Currently on branch '${json.branch.name}'`);
           requireAuth(argv, () =>
@@ -1828,6 +1863,7 @@ yargs(hideBin(process.argv)) // eslint-disable-line no-unused-expressions
             cliAction: Avo.CliAction.CHECKOUT,
             cliInvokedByCi: invokedByCi(),
             force: undefined,
+            forceFeatures: undefined,
           });
           throw error;
         }),
@@ -1852,6 +1888,7 @@ yargs(hideBin(process.argv)) // eslint-disable-line no-unused-expressions
                   cliAction: Avo.CliAction.SOURCE,
                   cliInvokedByCi: invokedByCi(),
                   force: undefined,
+                  forceFeatures: undefined,
                 });
 
                 if (!json.sources || !json.sources.length) {
@@ -1882,6 +1919,7 @@ yargs(hideBin(process.argv)) // eslint-disable-line no-unused-expressions
                   cliAction: Avo.CliAction.SOURCE,
                   cliInvokedByCi: invokedByCi(),
                   force: undefined,
+                  forceFeatures: undefined,
                 });
                 throw error;
               });
@@ -1902,6 +1940,7 @@ yargs(hideBin(process.argv)) // eslint-disable-line no-unused-expressions
                   cliAction: Avo.CliAction.SOURCE_ADD,
                   cliInvokedByCi: invokedByCi(),
                   force: undefined,
+                  forceFeatures: undefined,
                 });
 
                 requireAuth(argv, () => {
@@ -1918,6 +1957,7 @@ yargs(hideBin(process.argv)) // eslint-disable-line no-unused-expressions
                   cliAction: Avo.CliAction.SOURCE_ADD,
                   cliInvokedByCi: invokedByCi(),
                   force: undefined,
+                  forceFeatures: undefined,
                 });
                 throw error;
               });
@@ -1939,6 +1979,7 @@ yargs(hideBin(process.argv)) // eslint-disable-line no-unused-expressions
                   cliAction: Avo.CliAction.SOURCE_REMOVE,
                   cliInvokedByCi: invokedByCi(),
                   force: undefined,
+                  forceFeatures: undefined,
                 });
 
                 if (!json.sources || !json.sources.length) {
@@ -2021,6 +2062,7 @@ yargs(hideBin(process.argv)) // eslint-disable-line no-unused-expressions
                   cliAction: Avo.CliAction.SOURCE_REMOVE,
                   cliInvokedByCi: invokedByCi(),
                   force: undefined,
+                  forceFeatures: undefined,
                 });
                 throw error;
               });
@@ -2043,6 +2085,7 @@ yargs(hideBin(process.argv)) // eslint-disable-line no-unused-expressions
             cliAction: Avo.CliAction.STATUS,
             cliInvokedByCi: invokedByCi(),
             force: undefined,
+            forceFeatures: undefined,
           });
           report.info(`Currently on branch '${json.branch.name}'`);
           return getSource(argv, json);
@@ -2058,16 +2101,23 @@ yargs(hideBin(process.argv)) // eslint-disable-line no-unused-expressions
             cliAction: Avo.CliAction.STATUS,
             cliInvokedByCi: invokedByCi(),
             force: undefined,
+            forceFeatures: undefined,
           });
           throw error;
         });
     },
   })
-
   .command({
     command: 'merge main',
     aliases: ['merge master'],
     desc: 'Pull the Avo main branch into your current branch',
+    builder: (yargs) =>
+      yargs.option('f', {
+        alias: 'force',
+        describe: 'Proceed with merge when incoming branch is open',
+        default: false,
+        type: 'boolean',
+      }),
     handler: (argv) => {
       loadAvoJsonOrInit({ argv, skipPullMaster: true, skipInit: false })
         .then((json) => {
@@ -2080,6 +2130,7 @@ yargs(hideBin(process.argv)) // eslint-disable-line no-unused-expressions
             cliAction: Avo.CliAction.MERGE,
             cliInvokedByCi: invokedByCi(),
             force: json.force,
+            forceFeatures: undefined,
           });
 
           return requireAuth(argv, () => pullMaster(json).then(writeAvoJson));
@@ -2094,6 +2145,7 @@ yargs(hideBin(process.argv)) // eslint-disable-line no-unused-expressions
             cliAction: Avo.CliAction.MERGE,
             cliInvokedByCi: invokedByCi(),
             force: undefined,
+            forceFeatures: undefined,
           });
           throw error;
         });
@@ -2121,6 +2173,7 @@ yargs(hideBin(process.argv)) // eslint-disable-line no-unused-expressions
                   cliAction: Avo.CliAction.CONFLICT,
                   cliInvokedByCi: invokedByCi(),
                   force: undefined,
+                  forceFeatures: undefined,
                 });
                 pull(null, json);
               }),
@@ -2139,6 +2192,7 @@ yargs(hideBin(process.argv)) // eslint-disable-line no-unused-expressions
             cliAction: Avo.CliAction.CONFLICT,
             cliInvokedByCi: invokedByCi(),
             force: undefined,
+            forceFeatures: undefined,
           });
           return Promise.resolve(json);
         })
@@ -2152,6 +2206,7 @@ yargs(hideBin(process.argv)) // eslint-disable-line no-unused-expressions
             cliAction: Avo.CliAction.CONFLICT,
             cliInvokedByCi: invokedByCi(),
             force: undefined,
+            forceFeatures: undefined,
           });
           throw error;
         }),
@@ -2171,6 +2226,7 @@ yargs(hideBin(process.argv)) // eslint-disable-line no-unused-expressions
             cliAction: Avo.CliAction.EDIT,
             cliInvokedByCi: invokedByCi(),
             force: undefined,
+            forceFeatures: undefined,
           });
 
           const { schema } = json;
@@ -2190,6 +2246,7 @@ yargs(hideBin(process.argv)) // eslint-disable-line no-unused-expressions
             cliAction: Avo.CliAction.EDIT,
             cliInvokedByCi: invokedByCi(),
             force: undefined,
+            forceFeatures: undefined,
           });
           throw error;
         });
@@ -2238,6 +2295,7 @@ yargs(hideBin(process.argv)) // eslint-disable-line no-unused-expressions
             cliAction: Avo.CliAction.LOGIN,
             cliInvokedByCi: invokedByCi(),
             force: undefined,
+            forceFeatures: undefined,
           });
           command();
         })
@@ -2251,6 +2309,7 @@ yargs(hideBin(process.argv)) // eslint-disable-line no-unused-expressions
             cliAction: Avo.CliAction.LOGIN,
             cliInvokedByCi: invokedByCi(),
             force: undefined,
+            forceFeatures: undefined,
           });
           command();
         });
@@ -2295,6 +2354,7 @@ yargs(hideBin(process.argv)) // eslint-disable-line no-unused-expressions
             cliAction: Avo.CliAction.LOGOUT,
             cliInvokedByCi: invokedByCi(),
             force: undefined,
+            forceFeatures: undefined,
           });
           command();
         })
@@ -2308,6 +2368,7 @@ yargs(hideBin(process.argv)) // eslint-disable-line no-unused-expressions
             cliAction: Avo.CliAction.LOGOUT,
             cliInvokedByCi: invokedByCi(),
             force: undefined,
+            forceFeatures: undefined,
           });
           command();
         });
@@ -2339,6 +2400,7 @@ yargs(hideBin(process.argv)) // eslint-disable-line no-unused-expressions
             cliAction: Avo.CliAction.WHOAMI,
             cliInvokedByCi: invokedByCi(),
             force: undefined,
+            forceFeatures: undefined,
           });
           command();
         })
@@ -2352,6 +2414,7 @@ yargs(hideBin(process.argv)) // eslint-disable-line no-unused-expressions
             cliAction: Avo.CliAction.WHOAMI,
             cliInvokedByCi: invokedByCi(),
             force: undefined,
+            forceFeatures: undefined,
           });
           command();
         });
