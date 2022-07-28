@@ -329,8 +329,8 @@ function _avo_invoke_payload(body: object) {
 _avo_invoke = function _avo_invoke(env: string, eventId: string, hash: string, messages: {tag: string, propertyId: string}[], origin: string) {
   try {
     _avo_invoke_payload({
-      "ac": "zDRq4T0nUVOlY1EWXyN5",
-      "br": "master",
+      "ac": "7Lk2c1ODN76gJr4AFEIk",
+      "br": "qsHHWtDYF",
       "en": env,
       "ev": eventId,
       "ha": hash,
@@ -347,8 +347,8 @@ _avo_invoke = function _avo_invoke(env: string, eventId: string, hash: string, m
 _avo_invoke_meta = function _avo_invoke_meta(env: string, type: string, messages: {tag: string, propertyId: string}[], origin: string) {
   try {
     _avo_invoke_payload({
-      "ac": "zDRq4T0nUVOlY1EWXyN5",
-      "br": "master",
+      "ac": "7Lk2c1ODN76gJr4AFEIk",
+      "br": "qsHHWtDYF",
       "en": env,
       "ty": type,
       "sc": "fwtXqAc0fCLy7b7oGW40",
@@ -516,7 +516,7 @@ export interface SignedInProperties {
  * @param properties.email: The user's email
  * @param properties.authenticationMethod: Type of authentication method used by user logging in or signing up
  *
- * @see {@link https://www.avo.app/schemas/fwtXqAc0fCLy7b7oGW40/events/54e92613-090c-4f0b-afeb-ed720eff3422}
+ * @see {@link https://www.avo.app/schemas/fwtXqAc0fCLy7b7oGW40/branches/qsHHWtDYF/events/54e92613-090c-4f0b-afeb-ed720eff3422}
  */
 export function signedIn(properties: SignedInProperties) {
   // assert properties
@@ -579,7 +579,7 @@ export interface SignInFailedProperties {
  * @param properties.signInError: no description
  * @param properties.emailInput: The email address that is put into the email input on the landing page
  *
- * @see {@link https://www.avo.app/schemas/fwtXqAc0fCLy7b7oGW40/events/7aa64217-bb89-44f5-9a68-f3bc0255a864}
+ * @see {@link https://www.avo.app/schemas/fwtXqAc0fCLy7b7oGW40/branches/qsHHWtDYF/events/7aa64217-bb89-44f5-9a68-f3bc0255a864}
  */
 export function signInFailed(properties: SignInFailedProperties) {
   // assert properties
@@ -639,6 +639,7 @@ export interface CliInvokedProperties {
   branchName: string;
   schemaName: string | null | undefined;
   force: boolean | null | undefined;
+  forceFeatures: string[] | null | undefined;
 }
 /**
  * Cli Invoked: Sent when any action is made in the CLI.
@@ -652,8 +653,9 @@ export interface CliInvokedProperties {
  * @param properties.branchName: The name of the branch that this event is related to.
  * @param properties.schemaName: Name of the schema that this event is related to.
  * @param properties.force: Whether the command was called with --force parameter
+ * @param properties.forceFeatures: The features overrides provided to the cli pull
  *
- * @see {@link https://www.avo.app/schemas/fwtXqAc0fCLy7b7oGW40/events/qqpIQEK11}
+ * @see {@link https://www.avo.app/schemas/fwtXqAc0fCLy7b7oGW40/branches/qsHHWtDYF/events/qqpIQEK11}
  */
 export function cliInvoked(properties: CliInvokedProperties) {
   // assert properties
@@ -661,7 +663,7 @@ export function cliInvoked(properties: CliInvokedProperties) {
     let messages: AvoAssertMessage[] = [];
     // debug console in Avo
     if (!__AVO_NOOP__) {
-      _avo_invoke(__AVO_ENV__, "qqpIQEK11", "33cb14472604cc190f9a5added26d5adb763245b0dc9a2138dc2a4b2cc5a48ef", messages.map(m => Object.assign({}, {tag: m.tag, propertyId: m.propertyId, additionalProperties: m.additionalProperties, actualType: m.actualType})), 'event');
+      _avo_invoke(__AVO_ENV__, "qqpIQEK11", "f424cee5a989c90c69502a11d76705f3b6bc0d3311322c59f5f42ef13269ab2e", messages.map(m => Object.assign({}, {tag: m.tag, propertyId: m.propertyId, additionalProperties: m.additionalProperties, actualType: m.actualType})), 'event');
     }
     InternalAvoLogger.logEventSent("Cli Invoked", {
       "Cli Action": properties.cliAction,
@@ -671,6 +673,7 @@ export function cliInvoked(properties: CliInvokedProperties) {
       "Branch Name": properties.branchName,
       "Schema Name": properties.schemaName,
       "Force": properties.force,
+      "Force Features": properties.forceFeatures,
       "Client": sysClient,
       "Version": sysVersion,
       }, {});
@@ -688,6 +691,9 @@ export function cliInvoked(properties: CliInvokedProperties) {
   }
   if (properties.force !== undefined && properties.force !== null) {
     eventProperties["Force"] = properties.force;
+  }
+  if (properties.forceFeatures !== undefined && properties.forceFeatures !== null) {
+    eventProperties["Force Features"] = properties.forceFeatures;
   }
   eventProperties["Client"] = sysClient;
   eventProperties["Version"] = sysVersion;
@@ -708,9 +714,10 @@ export function cliInvoked(properties: CliInvokedProperties) {
         "Branch Name": properties.branchName,
         "Schema Name": properties.schemaName,
         "Force": properties.force,
+        "Force Features": properties.forceFeatures,
         "Client": sysClient,
         "Version": sysVersion,
-        }, "qqpIQEK11", "33cb14472604cc190f9a5added26d5adb763245b0dc9a2138dc2a4b2cc5a48ef")
+        }, "qqpIQEK11", "f424cee5a989c90c69502a11d76705f3b6bc0d3311322c59f5f42ef13269ab2e")
       : Promise.resolve(),
       // destination CustomNodeJS
       CustomNodeJS.logEvent(properties.userId_, "Cli Invoked", (Object as any).assign({}, eventProperties)),
@@ -732,7 +739,7 @@ export interface CliInstalledProperties {
  * @param properties.userId_: User Id is required for server sources.
  * @param properties.cliInvokedByCi: True iff process.env.CI is set.
  *
- * @see {@link https://www.avo.app/schemas/fwtXqAc0fCLy7b7oGW40/events/JCwfVYXTS}
+ * @see {@link https://www.avo.app/schemas/fwtXqAc0fCLy7b7oGW40/branches/qsHHWtDYF/events/JCwfVYXTS}
  */
 export function cliInstalled(properties: CliInstalledProperties) {
   // assert properties
@@ -797,7 +804,7 @@ export interface CliConflictResolveAttemptedProperties {
  * @param properties.branchName: The name of the branch that this event is related to.
  * @param properties.schemaName: Name of the schema that this event is related to.
  *
- * @see {@link https://www.avo.app/schemas/fwtXqAc0fCLy7b7oGW40/events/Un5dTEMQYy}
+ * @see {@link https://www.avo.app/schemas/fwtXqAc0fCLy7b7oGW40/branches/qsHHWtDYF/events/Un5dTEMQYy}
  */
 export function cliConflictResolveAttempted(
   properties: CliConflictResolveAttemptedProperties) {
@@ -877,7 +884,7 @@ export interface CliConflictResolveFailedProperties {
  * @param properties.branchId: The ID of the branch that this event is related to.
  * @param properties.branchName: The name of the branch that this event is related to.
  *
- * @see {@link https://www.avo.app/schemas/fwtXqAc0fCLy7b7oGW40/events/4ZhoijIA2U}
+ * @see {@link https://www.avo.app/schemas/fwtXqAc0fCLy7b7oGW40/branches/qsHHWtDYF/events/4ZhoijIA2U}
  */
 export function cliConflictResolveFailed(
   properties: CliConflictResolveFailedProperties) {
@@ -957,7 +964,7 @@ export interface CliConflictResolveSucceededProperties {
  * @param properties.branchId: The ID of the branch that this event is related to.
  * @param properties.branchName: The name of the branch that this event is related to.
  *
- * @see {@link https://www.avo.app/schemas/fwtXqAc0fCLy7b7oGW40/events/yj_554q43i}
+ * @see {@link https://www.avo.app/schemas/fwtXqAc0fCLy7b7oGW40/branches/qsHHWtDYF/events/yj_554q43i}
  */
 export function cliConflictResolveSucceeded(
   properties: CliConflictResolveSucceededProperties) {
