@@ -1681,12 +1681,6 @@ yargs(hideBin(process.argv)) // eslint-disable-line no-unused-expressions
     describe: 'make output more verbose',
     type: 'boolean',
   })
-  .option('f', {
-    alias: 'force',
-    describe: 'Proceed with merge when incoming branch is open',
-    default: false,
-    type: 'boolean',
-  })
   .command({
     command: 'track-install',
     desc: false,
@@ -1765,8 +1759,19 @@ yargs(hideBin(process.argv)) // eslint-disable-line no-unused-expressions
     builder: (yargs) =>
       yargs.option('branch', {
         describe: 'Name of Avo branch to pull from',
+        default: 'main',
         type: 'string',
-      }),
+      }).option('f', {
+        alias: 'force',
+        describe: 'Proceed ignoring the unsupported features for given source',
+        default: false,
+        type: 'boolean',
+      })
+        .option('forceFeatures', {
+          describe: 'Optional comma separated list of features to force enable',
+          default: undefined,
+          type: 'string',
+        }),
     handler: (argv) => {
       loadAvoJsonOrInit({ argv, skipInit: false, skipPullMaster: false })
         .then((json) => {
@@ -2086,11 +2091,23 @@ yargs(hideBin(process.argv)) // eslint-disable-line no-unused-expressions
         });
     },
   })
-
+  /*  .option('f', {
+    alias: 'force',
+    describe: 'Proceed with merge when incoming branch is open or pull when there are unsupported features',
+    default: false,
+    type: 'boolean',
+  })*/
   .command({
     command: 'merge main',
     aliases: ['merge master'],
     desc: 'Pull the Avo main branch into your current branch',
+    builder: (yargs) =>
+      yargs.option('f', {
+        alias: 'force',
+        describe: 'Proceed with merge when incoming branch is open',
+        default: false,
+        type: 'boolean',
+      }),
     handler: (argv) => {
       loadAvoJsonOrInit({ argv, skipPullMaster: true, skipInit: false })
         .then((json) => {
