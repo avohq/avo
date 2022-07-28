@@ -1,6 +1,6 @@
 {
   "avo": {
-    "version": 1
+    "version": 3
   },
   "schema": {
     "id": "fwtXqAc0fCLy7b7oGW40",
@@ -10,15 +10,15 @@
     "id": "master",
     "name": "main"
   },
-  "force": false,
+  "force": true,
   "sources": [
     {
       "id": "xOUFa-ew2",
       "name": "Cli",
-      "path": "Avo.js",
-      "actionId": "0PwMjPaMtkOkKQpGoQev",
+      "path": "Avo.ts",
+      "actionId": "DL73ZlCScWgNkQwC3eRv",
       "branchId": "master",
-      "updatedAt": "2021-11-14T18:50:05.501Z"
+      "updatedAt": "2022-07-11T14:59:05.579Z"
     }
   ]
 }

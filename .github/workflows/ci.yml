@@ -2,20 +2,26 @@ name: CI
 on: push
 
 jobs:
-  build:
+  build-and-check:
     runs-on: ubuntu-latest
-    
+
+    strategy:
+      matrix:
+        node-version: [14.x, 16.x, 18.x, latest]
+
     steps:
-    - uses: actions/checkout@v3
-    - uses: actions/setup-node@v3
-      with:
-        node-version: 16
-        cache: 'yarn'
-    - name: Install modules
-      run: yarn install --immutable
-    - name: Run ESLint
-      run: yarn eslint cli.js
-    - name: Run Prettier
-      run: yarn prettier --check cli.js
-    - name: Avo status
-      run: node cli.js status
+      - uses: actions/checkout@v3
+      - uses: actions/setup-node@v3
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: 'yarn'
+      - name: Install modules
+        run: yarn install --immutable
+      - name: Build TypeScript
+        run: yarn compile
+      - name: Check linting
+        run: yarn lint
+      - name: Check formatting
+        run: yarn check-format
+      - name: Check avo status
+        run: node cli.js status

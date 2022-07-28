@@ -2,15 +2,14 @@
 import ora from 'ora';
 import chalk from 'chalk';
 import minimatch from 'minimatch';
-import _ from 'lodash';
 import dateFns from 'date-fns';
 import fs from 'fs';
 import http from 'http';
 import inquirer from 'inquirer';
 import jwt from 'jsonwebtoken';
-import loadJsonFile from 'load-json-file';
+import { loadJsonFile } from 'load-json-file';
 import logSymbols from 'log-symbols';
-import opn from 'opn';
+import open from 'open';
 import path from 'path';
 import pify from 'pify';
 import portfinder from 'portfinder';
@@ -24,9 +23,9 @@ import util from 'util';
 import { v4 as uuidv4 } from 'uuid';
 import walk from 'ignore-walk';
 import writeFile from 'write';
-import writeJsonFile from 'write-json-file';
+import { writeJsonFile } from 'write-json-file';
 import Configstore from 'configstore';
-import Inspector from 'node-avo-inspector';
+import { AvoInspector, AvoInspectorEnv } from 'node-avo-inspector';
 import yargs from 'yargs';
 import { hideBin } from 'yargs/helpers';
 import httpShutdown from 'http-shutdown';
@@ -34,15 +33,23 @@ import fuzzypath from 'inquirer-fuzzy-path';
 
 import Avo from './Avo.js';
 
+declare global {
+  namespace NodeJS {
+    interface ImportMeta {
+      url: string;
+    }
+  }
+}
+
 const pkg = JSON.parse(
-  fs.readFileSync(new URL('package.json', import.meta.url)),
+  fs.readFileSync(new URL('package.json', import.meta.url), 'utf-8'),
 );
 
 const { Minimatch } = minimatch;
-const { cyan, gray, red, bold, underline } = chalk;
 
 /// //////////////////////////////////////////////////////////////////////
 // LOGGING
+const { cyan, gray, red, bold, underline } = chalk;
 
 function cmd(command) {
   return `${gray('`')}${cyan(command)}${gray('`')}`;
@@ -112,17 +119,32 @@ if (!conf.has('avo_install_id')) {
 
 const FIFTEEN_MINUTES_IN_MS = 15 * 60 * 1000;
 
-const nonce = _.random(1, 2 << 29).toString();
+const nonce = (1 + Math.random() * (2 << 29)).toString();
+
+function isString(str) {
+  if (str != null && typeof str.valueOf() === 'string') {
+    return true;
+  }
+  return false;
+}
+
+const sum = (base, value) => base + value;
 
 portfinder.basePort = 9005;
 const _getPort = portfinder.getPortPromise;
 
-function AvoError(message, options = {}) {
+type ErrorOptions = {
+  status?: number;
+  exit?: number;
+  original?: Error;
+  context?: Object;
+};
+
+function AvoError(message, options: ErrorOptions = {}) {
   this.name = 'AvoError';
   this.message = message;
-  this.children = options.children || [];
-  this.status = options.status || 500;
-  this.exit = options.exit || 1;
+  this.status = options.status ?? 500;
+  this.exit = options.exit ?? 1;
   this.stack = new Error().stack;
   this.original = options.original;
   this.context = options.context;
@@ -136,11 +158,22 @@ const INVALID_CREDENTIAL_ERROR = new AvoError(
   { exit: 1 },
 );
 
+type ApiTokenResult = {
+  idToken?: string;
+  refreshToken?: string;
+  expiresIn: number;
+};
+
 // in-memory cache, so we have it for successive calls
-let lastAccessToken = {};
+type LastAccessToken = {
+  expiresAt?: number;
+  refreshToken?: string;
+  idToken?: string;
+};
+
+let lastAccessToken: LastAccessToken = {};
 let accessToken;
 let refreshToken;
-let commandScopes;
 
 /// //////////////////////////////////////////////////////////////////////
 // REQUEST HANDLING
@@ -174,7 +207,7 @@ function responseToError(response) {
   }
 
   const message = `HTTP Error: ${response.statusCode}, ${
-    body.error.message || body.error
+    body.error.message ?? body.error
   }`;
 
   let exitCode;
@@ -186,7 +219,8 @@ function responseToError(response) {
     exitCode = 1;
   }
 
-  _.unset(response, 'request.headers');
+  delete response.request.headers;
+
   return new AvoError(message, {
     context: {
       body,
@@ -199,12 +233,11 @@ function responseToError(response) {
 function _request(options) {
   return new Promise((resolve, reject) => {
     got(options)
-      .json()
       .then((response) => {
         if (response.statusCode >= 400) {
           return reject(responseToError(response));
         }
-        return resolve(response);
+        return resolve(JSON.parse(response.body));
       })
       .catch((err) =>
         reject(
@@ -219,8 +252,8 @@ function _request(options) {
 
 const _appendQueryData = (urlPath, data) => {
   let returnPath = urlPath;
-  if (data && _.size(data) > 0) {
-    returnPath += _.includes(returnPath, '?') ? '&' : '?';
+  if (data && Object.keys(data).length > 0) {
+    returnPath += returnPath.includes('?') ? '&' : '?';
     returnPath += querystring.stringify(data);
   }
   return returnPath;
@@ -235,19 +268,17 @@ function _refreshAccessToken(refreshToken) {
       },
     })
     .then(
-      (data) => {
-        if (!_.isString(data.idToken)) {
+      (data: ApiTokenResult) => {
+        if (!isString(data.idToken)) {
           throw INVALID_CREDENTIAL_ERROR;
         }
-        lastAccessToken = _.assign(
-          {
-            expiresAt: Date.now() + data.expiresIn * 1000,
-            refreshToken,
-          },
-          data,
-        );
+        lastAccessToken = {
+          expiresAt: Date.now() + data.expiresIn * 1000,
+          refreshToken,
+          ...data,
+        };
 
-        const currentRefreshToken = _.get(conf.get('tokens'), 'refreshToken');
+        const currentRefreshToken = conf.get('tokens').refreshToken;
         if (refreshToken === currentRefreshToken) {
           conf.set('tokens', lastAccessToken);
         }
@@ -261,17 +292,17 @@ function _refreshAccessToken(refreshToken) {
 }
 
 function _haveValidAccessToken(refreshToken) {
-  if (_.isEmpty(lastAccessToken)) {
+  if (Object.keys(lastAccessToken).length === 0) {
     const tokens = conf.get('tokens');
-    if (refreshToken === _.get(tokens, 'refreshToken')) {
+    if (refreshToken === tokens.refreshToken) {
       lastAccessToken = tokens;
     }
   }
 
   return (
-    _.has(lastAccessToken, 'idToken') &&
+    lastAccessToken.idToken &&
     lastAccessToken.refreshToken === refreshToken &&
-    _.has(lastAccessToken, 'expiresAt') &&
+    lastAccessToken.expiresAt &&
     lastAccessToken.expiresAt > Date.now() + FIFTEEN_MINUTES_IN_MS
   );
 }
@@ -283,6 +314,15 @@ function getAccessToken(refreshToken) {
 
   return _refreshAccessToken(refreshToken);
 }
+
+type ReqOptions = {
+  method: string;
+  decompress: boolean;
+  headers: object; // Should be stricter
+  json?: object;
+  form?: object; // Is it?
+  url?: string;
+};
 
 const api = {
   authOrigin: 'https://www.avo.app',
@@ -298,24 +338,27 @@ const api = {
   getAccessToken() {
     return accessToken
       ? Promise.resolve({ idToken: accessToken })
-      : getAccessToken(refreshToken, commandScopes);
+      : getAccessToken(refreshToken);
   },
   addRequestHeaders(reqOptions) {
     // Runtime fetch of Auth singleton to prevent circular module dependencies
-    _.set(reqOptions, ['headers', 'User-Agent'], `AvoCLI/${pkg.version}`);
-    _.set(reqOptions, ['headers', 'X-Client-Version'], `AvoCLI/${pkg.version}`);
-    return api.getAccessToken().then((result) => {
-      _.set(reqOptions, 'headers.authorization', `Bearer ${result.idToken}`);
-      return reqOptions;
-    });
+    return api.getAccessToken().then((result) => ({
+      ...reqOptions,
+      headers: {
+        ...reqOptions.headers,
+        'User-Agent': `AvoCLI/${pkg.version}`,
+        'X-Client-Version': `AvoCLI/${pkg.version}`,
+        authorization: `Bearer ${result.idToken}`,
+      },
+    }));
   },
   request(method, resource, options) {
     const validMethods = ['GET', 'PUT', 'POST', 'DELETE', 'PATCH'];
 
-    const reqOptions = {
+    const reqOptions: ReqOptions = {
       method: validMethods.includes(method) ? method : 'GET',
       decompress: true,
-      headers: options.headers || {},
+      headers: options.headers ?? {},
     };
 
     let urlPath = resource;
@@ -325,9 +368,9 @@ const api = {
 
     if (reqOptions.method === 'GET') {
       urlPath = _appendQueryData(urlPath, options.json);
-    } else if (_.size(options.json) > 0) {
+    } else if (Object.keys(options.json).length > 0) {
       reqOptions.json = options.json;
-    } else if (_.size(options.form) > 0) {
+    } else if (Object.keys(options.form).length > 0) {
       reqOptions.form = options.form;
     }
 
@@ -345,10 +388,7 @@ const api = {
     return requestFunction().catch((err) => {
       if (
         options.retryCodes &&
-        _.includes(
-          options.retryCodes,
-          _.get(err, 'context.response.statusCode'),
-        )
+        options.retryCodes.includes(err.context.response.statusCode)
       ) {
         return new Promise((resolve) => {
           setTimeout(resolve, 1000);
@@ -364,7 +404,7 @@ const customAnalyticsDestination = {
     this.production = production;
   },
 
-  logEvent: function logEvent(userId, eventName, eventProperties) {
+  logEvent: (userId, eventName, eventProperties) => {
     api
       .request('POST', '/c/v1/track', {
         origin: api.apiOrigin,
@@ -377,21 +417,23 @@ const customAnalyticsDestination = {
       .catch(() => {
         // don't crash on tracking errors
       });
+
+    return undefined;
   },
 
-  setUserProperties: () => {}, // noop
+  setUserProperties: () => undefined, // noop
 };
 
-const inspector = new Inspector.AvoInspector({
+const inspector = new AvoInspector({
   apiKey: '3UWtteG9HenZ825cYoYr',
-  env: Inspector.AvoInspectorEnv.Prod,
-  version: '1.0.0',
+  env: AvoInspectorEnv.Prod,
+  version: pkg.version,
   appName: 'Avo CLI',
 });
 
 // setup Avo analytics
 Avo.initAvo(
-  { env: 'prod', inspector },
+  { env: Avo.AvoEnv.Prod, inspector },
   { client: Avo.Client.CLI, version: pkg.version },
   {},
   customAnalyticsDestination,
@@ -399,7 +441,7 @@ Avo.initAvo(
 
 function isLegacyAvoJson(json) {
   // check if legacy avo.json or un-initialized project
-  return json.types || !json.schema;
+  return json.types ?? !json.schema;
 }
 
 function avoNeedsUpdate(json) {
@@ -557,7 +599,7 @@ function requireAuth(argv, cb) {
   const tokens = conf.get('tokens');
   const user = conf.get('user');
 
-  const tokenOpt = argv.token || process.env.AVO_TOKEN;
+  const tokenOpt = argv.token ?? process.env.AVO_TOKEN;
 
   if (tokenOpt) {
     api.setRefreshToken(tokenOpt);
@@ -574,6 +616,10 @@ function requireAuth(argv, cb) {
   api.setRefreshToken(tokens.refreshToken);
   return cb();
 }
+
+type ApiWorkspacesResult = {
+  workspaces: [{ lastUsedAt: number; name: string }];
+};
 
 function init() {
   const makeAvoJson = (schema) => {
@@ -599,9 +645,11 @@ function init() {
       origin: api.apiOrigin,
       auth: true,
     })
-    .then(({ workspaces }) => {
+    .then(({ workspaces }: ApiWorkspacesResult) => {
       cancelWait();
-      const schemas = _.orderBy(workspaces, 'lastUsedAt', 'desc');
+      const schemas = [...workspaces].sort(
+        (a, b) => a.lastUsedAt - b.lastUsedAt,
+      );
       if (schemas.length > 1) {
         const choices = schemas.map((schema) => ({
           value: schema,
@@ -644,6 +692,10 @@ function validateAvoJson(json) {
   return { ...json, avo: { ...json.avo, version: semver.major(pkg.version) } };
 }
 
+type ApiBranchesResult = {
+  branches: [{ name: string; id: string }];
+};
+
 function fetchBranches(json) {
   wait('Fetching open branches');
   const payload = {
@@ -653,15 +705,21 @@ function fetchBranches(json) {
       schemaId: json.schema.id,
     },
   };
-  return api.request('POST', '/c/v1/branches', payload).then((data) => {
-    cancelWait();
-    const branches = _.sortBy(data.branches, 'name');
-    // The api still returns master for backwards comparability so we manually
-    // update the branch name to main
-    return branches.map((branch) =>
-      branch.name === 'master' ? { ...branch, name: 'main' } : branch,
-    );
-  });
+  return api
+    .request('POST', '/c/v1/branches', payload)
+    .then((data: ApiBranchesResult) => {
+      cancelWait();
+      const branches = [...data.branches].sort((a, b) => {
+        if (a.name < b.name) return -1;
+        if (a.name > b.name) return 1;
+        return 0;
+      });
+      // The api still returns master for backwards comparability so we manually
+      // update the branch name to main
+      return branches.map((branch) =>
+        branch.name === 'master' ? { ...branch, name: 'main' } : branch,
+      );
+    });
 }
 
 function checkout(branchToCheckout, json) {
@@ -671,10 +729,7 @@ function checkout(branchToCheckout, json) {
         value: branch,
         name: branch.name,
       }));
-      const currentBranch = _.find(
-        branches,
-        (branch) => branch.id === json.branch.id,
-      );
+      const currentBranch = branches.find(({ id }) => id === json.branch.id);
       return inquirer
         .prompt([
           {
@@ -682,8 +737,7 @@ function checkout(branchToCheckout, json) {
             name: 'branch',
             message: 'Select a branch',
             default:
-              currentBranch ||
-              _.find(branches, (branch) => branch.id === 'master'),
+              currentBranch ?? branches.find(({ id }) => id === 'master'),
             choices,
             pageSize: 15,
           },
@@ -717,8 +771,7 @@ function checkout(branchToCheckout, json) {
       report.info(`Already on '${adjustedBranchToCheckout}'`);
       return json;
     }
-    const branch = _.find(
-      branches,
+    const branch = branches.find(
       ({ name }) => name === adjustedBranchToCheckout,
     );
 
@@ -774,10 +827,8 @@ function resolveAvoJsonConflicts(avoFile, { argv, skipPullMaster }) {
   }
 
   if (
-    !_.isEqual(
-      head.sources.map((s) => s.id),
-      incoming.sources.map((s) => s.id),
-    )
+    JSON.stringify(head.sources.map((s) => s.id)) !==
+    JSON.stringify(incoming.sources.map((s) => s.id))
   ) {
     Avo.cliConflictResolveFailed({
       userId_: installIdOrUserId(),
@@ -929,15 +980,11 @@ function writeAvoJson(json) {
   }).then(() => json);
 }
 
-function codegen(json, result) {
-  const { schema } = result;
-  const targets = result.sources;
-  const newJson = { ..._.cloneDeep(json), schema };
-  const { warnings } = result;
-  const { errors } = result;
+function codegen(json, { schema, sources: targets, warnings, errors }) {
+  const newJson = { ...JSON.parse(JSON.stringify(json)), schema };
 
   newJson.sources = newJson.sources.map((source) => {
-    const target = _.find(targets, ({ id }) => id === source.id);
+    const target = targets.find(({ id }) => id === source.id);
     if (target) {
       return {
         ...source,
@@ -958,7 +1005,7 @@ function codegen(json, result) {
 
   const avoJsonTask = writeAvoJson(newJson);
 
-  Promise.all(_.concat([avoJsonTask], sourceTasks)).then(() => {
+  Promise.all([avoJsonTask].concat(sourceTasks)).then(() => {
     if (errors !== undefined && errors !== null && errors !== '') {
       report.warn(`${errors}\n`);
     }
@@ -978,7 +1025,7 @@ function codegen(json, result) {
       } successfully updated`,
     );
     targets.forEach((target) => {
-      const source = _.find(newJson.sources, ({ id }) => id === target.id);
+      const source = newJson.sources.find(({ id }) => id === target.id);
       report.tree('sources', [
         {
           name: source.name,
@@ -993,6 +1040,10 @@ function matchesSource(source, filter) {
   return source.name.toLowerCase() === filter.toLowerCase();
 }
 
+type ApiSourcesResult = {
+  sources: [{ id: string; name: string; filenameHint: string }];
+};
+
 function selectSource(sourceToAdd, json) {
   wait('Fetching sources');
   return api
@@ -1004,20 +1055,16 @@ function selectSource(sourceToAdd, json) {
         branchId: json.branch.id,
       },
     })
-    .then((data) => {
+    .then((data: ApiSourcesResult) => {
       cancelWait();
-      const existingSources = data.sources || [];
-      let sources = _.sortBy(
-        _.filter(
-          data.sources,
-          (source) =>
-            _.find(
-              existingSources,
-              (existingSource) => source.id === existingSource.id,
-            ) === undefined,
-        ),
-        'name',
-      );
+      const existingSources = json.sources ?? [];
+      let sources = data.sources
+        .filter((source) => !existingSources.find(({ id }) => source.id === id))
+        .sort((a, b) => {
+          if (a.name < b.name) return -1;
+          if (a.name > b.name) return 1;
+          return 0;
+        });
 
       const prompts = [
         {
@@ -1045,6 +1092,7 @@ function selectSource(sourceToAdd, json) {
           type: 'list',
           name: 'source',
           message: 'Select a source to set up',
+          // @ts-ignore
           choices,
           pageSize: 15,
         });
@@ -1052,12 +1100,13 @@ function selectSource(sourceToAdd, json) {
           type: 'input',
           name: 'filename',
           message: 'Select a filename for the analytics wrapper',
+          // @ts-ignore
           default(answers) {
             return answers.source.filenameHint;
           },
         });
       } else {
-        const source = _.find(sources, (soruceToFind) =>
+        const source = sources.find((soruceToFind) =>
           matchesSource(soruceToFind, sourceToAdd),
         );
         if (!source) {
@@ -1067,6 +1116,7 @@ function selectSource(sourceToAdd, json) {
           type: 'input',
           name: 'filename',
           message: 'Select a filename for the library',
+          // @ts-ignore
           default() {
             return source.filenameHint;
           },
@@ -1080,7 +1130,7 @@ function selectSource(sourceToAdd, json) {
         );
         let source;
         if (sourceToAdd) {
-          source = _.find(sources, (sourceToFind) =>
+          source = sources.find((sourceToFind) =>
             matchesSource(sourceToFind, sourceToAdd),
           );
           source = { id: source.id, name: source.name, path: relativePath };
@@ -1091,7 +1141,7 @@ function selectSource(sourceToAdd, json) {
             path: relativePath,
           };
         }
-        sources = _.concat(json.sources || [], [source]);
+        sources = (json.sources ?? []).concat([source]);
         const newJson = { ...json, sources };
         report.info(`Added source ${source.name} to the project`);
         report.info(
@@ -1102,11 +1152,22 @@ function selectSource(sourceToAdd, json) {
     });
 }
 
+type ApiPullResult = {
+  ok: boolean;
+  branchName: string;
+  reason: string;
+  closedAt: string; // Datestring
+  sources: [];
+  warnings: object;
+  errors: object;
+  schema: object;
+};
+
 function pull(sourceFilter, json) {
   const sources = sourceFilter
-    ? [_.find(json.sources, (source) => matchesSource(source, sourceFilter))]
+    ? [json.sources.find((source) => matchesSource(source, sourceFilter))]
     : json.sources;
-  const sourceNames = _.map(sources, (source) => source.name);
+  const sourceNames = sources.map((source) => source.name);
   wait(`Pulling ${sourceNames.join(', ')}`);
 
   return getMasterStatus(json)
@@ -1125,15 +1186,15 @@ function pull(sourceFilter, json) {
         json: {
           schemaId: json.schema.id,
           branchId: json.branch.id,
-          sources: _.map(sources, (source) => ({
+          sources: sources.map((source) => ({
             id: source.id,
             path: source.path,
           })),
-          force: json.force || false,
+          force: json.force ?? false,
         },
       }),
     )
-    .then((result) => {
+    .then((result: ApiPullResult) => {
       cancelWait();
       if (result.ok) {
         codegen(json, result);
@@ -1141,9 +1202,9 @@ function pull(sourceFilter, json) {
         report.error(
           `Branch ${result.branchName} was ${
             result.reason
-          } ${dateFns.distanceInWords(
-            new Date(result.closedAt),
+          } ${dateFns.formatDistance(
             new Date(),
+            new Date(result.closedAt),
           )} ago. Pick another branch.`,
         );
         checkout(null, json).then((data) => pull(sourceFilter, data));
@@ -1228,7 +1289,7 @@ function getSource(argv, json) {
   }
   if (
     argv.source &&
-    !_.find(json.sources, (source) => matchesSource(source, argv.source))
+    !json.sources.find((source) => matchesSource(source, argv.source))
   ) {
     report.error(`Source ${argv.source} not found`);
     return requireAuth(argv, () =>
@@ -1243,7 +1304,7 @@ function getSource(argv, json) {
 
 function status(source, json, argv) {
   let sources = source
-    ? _.filter(json.sources, (s) => matchesSource(s, source))
+    ? json.sources.filter((s) => matchesSource(s, source))
     : json.sources;
 
   sources = sources.filter(({ analysis }) => analysis !== false);
@@ -1265,7 +1326,7 @@ function status(source, json, argv) {
             ]);
           }),
         ),
-    ).then((cachePairs) => _.fromPairs(cachePairs)),
+    ).then((cachePairs) => Object.fromEntries(cachePairs)),
   );
 
   fileCache
@@ -1277,11 +1338,11 @@ function status(source, json, argv) {
             if (eventMap !== null) {
               const moduleMap = getModuleMap(data);
               const sourcePath = path.parse(source.path);
-              const moduleName = _.get(
-                source,
-                'analysis.module',
-                moduleMap || sourcePath.name || 'Avo',
-              );
+              const moduleName =
+                source.analysis?.module ??
+                moduleMap ??
+                sourcePath.name ??
+                'Avo';
 
               const sourcePathExts = [];
 
@@ -1318,37 +1379,39 @@ function status(source, json, argv) {
 
               const globs = [
                 new Minimatch(
-                  _.get(
-                    source,
-                    'analysis.glob',
+                  source.analysis?.glob ??
                     `**/*.+(${sourcePathExts.join('|')})`,
-                  ),
                   {},
                 ),
                 new Minimatch(`!${source.path}`, {}),
               ];
 
-              const lookup = _.pickBy(cache, (value, path) =>
-                _.every(globs, (mm) => mm.match(path)),
-              );
+              const lookup = {};
+              Object.entries(cache).forEach(([cachePath, value]) => {
+                if (globs.every((mm) => mm.match(cachePath))) {
+                  lookup[cachePath] = value;
+                }
+              });
 
               return Promise.all(
                 eventMap.map((eventName) => {
                   const re = new RegExp(
                     `(${moduleName}\\.${eventName}|\\[${moduleName} ${eventName})`,
                   );
-                  const results = _.flatMap(lookup, (data, path) => {
-                    if (argv.verbose) {
-                      report.info(`Looking for events in ${path}`);
-                    }
-                    const results = findMatches(data, re);
-                    return results.length ? [[path, results]] : [];
-                  });
-                  return [eventName, _.fromPairs(results)];
+                  const results = Object.entries(lookup)
+                    .map(([path, data]) => {
+                      if (argv.verbose) {
+                        report.info(`Looking for events in ${path}`);
+                      }
+                      const results = findMatches(data, re);
+                      return results.length ? [[path, results]] : [];
+                    })
+                    .flat();
+                  return [eventName, Object.fromEntries(results)];
                 }),
               ).then((results) => ({
                 ...source,
-                results: _.fromPairs(results),
+                results: Object.fromEntries(results),
               }));
             }
             return source;
@@ -1361,28 +1424,39 @@ function status(source, json, argv) {
           'sources',
           sources.map((source) => ({
             name: `${source.name} (${source.path})`,
-            children: _.map(source.results, (results, eventName) => ({
-              name: eventName,
-              children:
-                _.size(results) > 0
-                  ? _.map(results, (result, matchFile) => ({
-                      name: `used in ${matchFile}: ${result.length}${
-                        result.length === 1 ? ' time' : ' times'
-                      }`,
-                    }))
-                  : [
-                      {
-                        name: `${logSymbols.error} no usage found`,
-                      },
-                    ],
-            })),
+            children: Object.entries(source.results).map(
+              ([eventName, results]) => ({
+                name: eventName,
+                children:
+                  Object.keys(results).length > 0
+                    ? Object.entries(results).map(([matchFile, result]) => ({
+                        name: `used in ${matchFile}: ${result.length}${
+                          result.length === 1 ? ' time' : ' times'
+                        }`,
+                      }))
+                    : [
+                        {
+                          name: `${logSymbols.error} no usage found`,
+                        },
+                      ],
+              }),
+            ),
           })),
         );
 
-        const totalEvents = _.sumBy(sources, ({ results }) => _.size(results));
-        const missingEvents = _.sumBy(sources, ({ results }) =>
-          _.sum(_.map(results, (missing) => (_.size(missing) > 0 ? 0 : 1))),
-        );
+        const totalEvents = sources
+          .map(({ results }) => Object.keys(results).length)
+          .reduce(sum, 0);
+
+        const missingEvents = sources
+          .map(
+            ({ results }) =>
+              Object.values(results).filter(
+                (missing) => Object.keys(missing).length === 0,
+              ).length,
+          )
+          .reduce(sum, 0);
+
         if (missingEvents === 0) {
           if (totalEvents === 0) {
             report.error(
@@ -1408,15 +1482,17 @@ function status(source, json, argv) {
             'missingEvents',
             sources.map((source) => ({
               name: `${source.name} (${source.path})`,
-              children: _.flatMap(source.results, (results, eventName) =>
-                _.size(results) === 0
-                  ? [
-                      {
-                        name: `${red(eventName)}: no usage found`,
-                      },
-                    ]
-                  : [],
-              ),
+              children: Object.entries(source.results)
+                .map(([eventName, results]) =>
+                  Object.keys(results).length === 0
+                    ? [
+                        {
+                          name: `${red(eventName)}: no usage found`,
+                        },
+                      ]
+                    : [],
+                )
+                .flat(),
             })),
           );
           process.exit(1);
@@ -1438,17 +1514,13 @@ function status(source, json, argv) {
 // AUTH
 
 function _getLoginUrl(callbackUrl) {
-  return `${api.authOrigin}/auth/cli?${_.map(
-    {
-      state: nonce,
-      redirect_uri: callbackUrl,
-    },
-    (v, k) => `${k}=${encodeURIComponent(v)}`,
-  ).join('&')}`;
+  return `${api.authOrigin}/auth/cli?state=${encodeURIComponent(
+    nonce,
+  )}&redirect_uri=${encodeURIComponent(callbackUrl)}`;
 }
 
-function _getCallbackUrl(port) {
-  if (_.isUndefined(port)) {
+function _getCallbackUrl(port?: number) {
+  if (port === undefined) {
     return 'urn:ietf:wg:oauth:2.0:oob';
   }
   return `http://localhost:${port}`;
@@ -1464,16 +1536,14 @@ function _getTokensFromAuthorizationCode(code, callbackUrl) {
       },
     })
     .then(
-      (data) => {
+      (data: ApiTokenResult) => {
         if (!data.idToken && !data.refreshToken) {
           throw INVALID_CREDENTIAL_ERROR;
         }
-        lastAccessToken = _.assign(
-          {
-            expiresAt: Date.now() + data.expiresIn * 1000,
-          },
-          data,
-        );
+        lastAccessToken = {
+          expiresAt: Date.now() + data.expiresIn * 1000,
+          ...data,
+        };
         return lastAccessToken;
       },
       () => {
@@ -1483,7 +1553,7 @@ function _getTokensFromAuthorizationCode(code, callbackUrl) {
 }
 
 function _respondWithRedirect(req, res, Location) {
-  return new Promise((resolve) => {
+  return new Promise<void>((resolve) => {
     res.writeHead(302, { Location });
     res.end();
     req.socket.destroy();
@@ -1495,21 +1565,49 @@ function _loginWithoutLocalhost() {
   const callbackUrl = _getCallbackUrl();
   const authUrl = _getLoginUrl(callbackUrl);
 
-  report.info(`Visit this URL on any device to login: ${url(authUrl)}`);
+  report.info(`Visit this URL on any device to login: ${new URL(authUrl)}`);
 
-  opn(authUrl, { wait: false });
+  return open(authUrl);
 }
 
-function _loginWithLocalhost(port) {
+type FirebaseSignInProvider = 'custom' | 'google.com' | 'password';
+
+type LoginResult = {
+  user: {
+    cli: boolean;
+    iss: string;
+    aud: string;
+    auth_time: number;
+    user_id: string;
+    sub: string;
+    iat: number;
+    email: string;
+    email_verified: boolean;
+    firebase: {
+      identities: object;
+      sign_in_provider: FirebaseSignInProvider;
+    };
+  };
+  tokens: {
+    expiresAt: number;
+    kind: string;
+    idToken: string;
+    refreshToken: string;
+    expiresIn: string;
+    isNewUser: boolean;
+  };
+};
+
+function _loginWithLocalhost(port: number) {
   return new Promise((resolve, reject) => {
     const callbackUrl = _getCallbackUrl(port);
     const authUrl = _getLoginUrl(callbackUrl);
 
     let server = http.createServer((req, res) => {
       let tokens;
-      const query = _.get(url.parse(req.url, true), 'query', {});
+      const query = url.parse(req.url, true).query ?? {};
 
-      if (query.state === nonce && _.isString(query.code)) {
+      if (query.state === nonce && isString(query.code)) {
         return _getTokensFromAuthorizationCode(query.code, callbackUrl)
           .then((result) => {
             tokens = result;
@@ -1521,7 +1619,7 @@ function _loginWithLocalhost(port) {
           })
           .then(() => {
             cancelWait();
-            server.shutdown();
+            server.close();
             return resolve({
               user: jwt.decode(tokens.idToken),
               tokens,
@@ -1540,7 +1638,7 @@ function _loginWithLocalhost(port) {
       report.info(`Visit this URL on any device to login: ${link(authUrl)}`);
       wait('Waiting for authentication...');
 
-      opn(authUrl, { wait: false });
+      open(authUrl);
     });
 
     server.on('error', () => {
@@ -1558,7 +1656,7 @@ function logout(refreshToken) {
     lastAccessToken = {};
   }
   const tokens = conf.get('tokens');
-  const currentToken = _.get(tokens, 'refreshToken');
+  const currentToken = tokens.refreshToken;
   if (refreshToken === currentToken) {
     conf.delete('user');
     conf.delete('tokens');
@@ -1595,7 +1693,7 @@ yargs(hideBin(process.argv)) // eslint-disable-line no-unused-expressions
     command: 'init',
     desc: 'Initialize an Avo workspace in the current folder',
     handler: (argv) => {
-      loadAvoJsonOrInit({ argv, skipInit: true })
+      loadAvoJsonOrInit({ argv, skipPullMaster: false, skipInit: true })
         .then((json) => {
           if (json) {
             Avo.cliInvoked({
@@ -1606,6 +1704,7 @@ yargs(hideBin(process.argv)) // eslint-disable-line no-unused-expressions
               userId_: installIdOrUserId(),
               cliAction: Avo.CliAction.INIT,
               cliInvokedByCi: invokedByCi(),
+              force: undefined,
             });
             report.info(
               `Avo is already initialized for workspace ${cyan(
@@ -1623,6 +1722,7 @@ yargs(hideBin(process.argv)) // eslint-disable-line no-unused-expressions
             userId_: installIdOrUserId(),
             cliAction: Avo.CliAction.INIT,
             cliInvokedByCi: invokedByCi(),
+            force: undefined,
           });
           return requireAuth(argv, () =>
             init()
@@ -1643,6 +1743,7 @@ yargs(hideBin(process.argv)) // eslint-disable-line no-unused-expressions
             userId_: installIdOrUserId(),
             cliAction: Avo.CliAction.INIT,
             cliInvokedByCi: invokedByCi(),
+            force: undefined,
           });
         });
     },
@@ -1656,7 +1757,7 @@ yargs(hideBin(process.argv)) // eslint-disable-line no-unused-expressions
         type: 'string',
       }),
     handler: (argv) => {
-      loadAvoJsonOrInit({ argv })
+      loadAvoJsonOrInit({ argv, skipInit: false, skipPullMaster: false })
         .then((json) => {
           Avo.cliInvoked({
             schemaId: json.schema.id,
@@ -1666,6 +1767,7 @@ yargs(hideBin(process.argv)) // eslint-disable-line no-unused-expressions
             userId_: installIdOrUserId(),
             cliAction: Avo.CliAction.PULL,
             cliInvokedByCi: invokedByCi(),
+            force: undefined,
           });
           requireAuth(argv, () => {
             if (argv.branch && json.branch.name !== argv.branch) {
@@ -1688,6 +1790,7 @@ yargs(hideBin(process.argv)) // eslint-disable-line no-unused-expressions
             userId_: installIdOrUserId(),
             cliAction: Avo.CliAction.PULL,
             cliInvokedByCi: invokedByCi(),
+            force: undefined,
           });
           throw error;
         });
@@ -1698,7 +1801,7 @@ yargs(hideBin(process.argv)) // eslint-disable-line no-unused-expressions
     aliases: ['branch'],
     desc: 'Switch branches',
     handler: (argv) =>
-      loadAvoJsonOrInit({ argv })
+      loadAvoJsonOrInit({ argv, skipInit: false, skipPullMaster: false })
         .then((json) => {
           Avo.cliInvoked({
             schemaId: json.schema.id,
@@ -1708,6 +1811,7 @@ yargs(hideBin(process.argv)) // eslint-disable-line no-unused-expressions
             userId_: installIdOrUserId(),
             cliAction: Avo.CliAction.CHECKOUT,
             cliInvokedByCi: invokedByCi(),
+            force: undefined,
           });
           report.info(`Currently on branch '${json.branch.name}'`);
           requireAuth(argv, () =>
@@ -1723,6 +1827,7 @@ yargs(hideBin(process.argv)) // eslint-disable-line no-unused-expressions
             userId_: installIdOrUserId(),
             cliAction: Avo.CliAction.CHECKOUT,
             cliInvokedByCi: invokedByCi(),
+            force: undefined,
           });
           throw error;
         }),
@@ -1736,7 +1841,7 @@ yargs(hideBin(process.argv)) // eslint-disable-line no-unused-expressions
           command: '$0',
           desc: 'List sources in this project',
           handler: (argv) => {
-            loadAvoJsonOrInit({ argv })
+            loadAvoJsonOrInit({ argv, skipInit: false, skipPullMaster: false })
               .then((json) => {
                 Avo.cliInvoked({
                   schemaId: json.schema.id,
@@ -1746,6 +1851,7 @@ yargs(hideBin(process.argv)) // eslint-disable-line no-unused-expressions
                   userId_: installIdOrUserId(),
                   cliAction: Avo.CliAction.SOURCE,
                   cliInvokedByCi: invokedByCi(),
+                  force: undefined,
                 });
 
                 if (!json.sources || !json.sources.length) {
@@ -1775,6 +1881,7 @@ yargs(hideBin(process.argv)) // eslint-disable-line no-unused-expressions
                   userId_: installIdOrUserId(),
                   cliAction: Avo.CliAction.SOURCE,
                   cliInvokedByCi: invokedByCi(),
+                  force: undefined,
                 });
                 throw error;
               });
@@ -1784,7 +1891,7 @@ yargs(hideBin(process.argv)) // eslint-disable-line no-unused-expressions
           command: 'add [source]',
           desc: 'Add a source to this project',
           handler: (argv) => {
-            loadAvoJsonOrInit({ argv })
+            loadAvoJsonOrInit({ argv, skipInit: false, skipPullMaster: false })
               .then((json) => {
                 Avo.cliInvoked({
                   schemaId: json.schema.id,
@@ -1794,6 +1901,7 @@ yargs(hideBin(process.argv)) // eslint-disable-line no-unused-expressions
                   userId_: installIdOrUserId(),
                   cliAction: Avo.CliAction.SOURCE_ADD,
                   cliInvokedByCi: invokedByCi(),
+                  force: undefined,
                 });
 
                 requireAuth(argv, () => {
@@ -1809,6 +1917,7 @@ yargs(hideBin(process.argv)) // eslint-disable-line no-unused-expressions
                   userId_: installIdOrUserId(),
                   cliAction: Avo.CliAction.SOURCE_ADD,
                   cliInvokedByCi: invokedByCi(),
+                  force: undefined,
                 });
                 throw error;
               });
@@ -1819,7 +1928,7 @@ yargs(hideBin(process.argv)) // eslint-disable-line no-unused-expressions
           aliases: ['rm'],
           desc: 'Remove a source from this project',
           handler: (argv) => {
-            loadAvoJsonOrInit({ argv })
+            loadAvoJsonOrInit({ argv, skipInit: false, skipPullMaster: false })
               .then((json) => {
                 Avo.cliInvoked({
                   schemaId: json.schema.id,
@@ -1829,6 +1938,7 @@ yargs(hideBin(process.argv)) // eslint-disable-line no-unused-expressions
                   userId_: installIdOrUserId(),
                   cliAction: Avo.CliAction.SOURCE_REMOVE,
                   cliInvokedByCi: invokedByCi(),
+                  force: undefined,
                 });
 
                 if (!json.sources || !json.sources.length) {
@@ -1840,10 +1950,10 @@ yargs(hideBin(process.argv)) // eslint-disable-line no-unused-expressions
                   return;
                 }
 
-                const getSourceToRemove = () => {
+                const getSourceToRemove = (argv, json) => {
                   if (argv.source) {
                     return Promise.resolve(
-                      _.find(json.sources, (source) =>
+                      json.sources.find((source) =>
                         matchesSource(source, argv.source),
                       ),
                     );
@@ -1882,8 +1992,7 @@ yargs(hideBin(process.argv)) // eslint-disable-line no-unused-expressions
                     ])
                     .then((answer) => {
                       if (answer.remove) {
-                        const sources = _.filter(
-                          json.sources || [],
+                        const sources = (json.sources ?? []).filter(
                           (source) => source.id !== targetSource.id,
                         );
                         const newJson = { ...json, sources };
@@ -1911,6 +2020,7 @@ yargs(hideBin(process.argv)) // eslint-disable-line no-unused-expressions
                   userId_: installIdOrUserId(),
                   cliAction: Avo.CliAction.SOURCE_REMOVE,
                   cliInvokedByCi: invokedByCi(),
+                  force: undefined,
                 });
                 throw error;
               });
@@ -1922,7 +2032,7 @@ yargs(hideBin(process.argv)) // eslint-disable-line no-unused-expressions
     command: 'status [source]',
     desc: 'Show the status of the Avo implementation',
     handler: (argv) => {
-      loadAvoJsonOrInit({ argv })
+      loadAvoJsonOrInit({ argv, skipInit: false, skipPullMaster: false })
         .then((json) => {
           Avo.cliInvoked({
             schemaId: json.schema.id,
@@ -1932,6 +2042,7 @@ yargs(hideBin(process.argv)) // eslint-disable-line no-unused-expressions
             userId_: installIdOrUserId(),
             cliAction: Avo.CliAction.STATUS,
             cliInvokedByCi: invokedByCi(),
+            force: undefined,
           });
           report.info(`Currently on branch '${json.branch.name}'`);
           return getSource(argv, json);
@@ -1946,6 +2057,7 @@ yargs(hideBin(process.argv)) // eslint-disable-line no-unused-expressions
             userId_: installIdOrUserId(),
             cliAction: Avo.CliAction.STATUS,
             cliInvokedByCi: invokedByCi(),
+            force: undefined,
           });
           throw error;
         });
@@ -1957,7 +2069,7 @@ yargs(hideBin(process.argv)) // eslint-disable-line no-unused-expressions
     aliases: ['merge master'],
     desc: 'Pull the Avo main branch into your current branch',
     handler: (argv) => {
-      loadAvoJsonOrInit({ argv, skipPullMaster: true })
+      loadAvoJsonOrInit({ argv, skipPullMaster: true, skipInit: false })
         .then((json) => {
           Avo.cliInvoked({
             schemaId: json.schema.id,
@@ -1981,6 +2093,7 @@ yargs(hideBin(process.argv)) // eslint-disable-line no-unused-expressions
             userId_: installIdOrUserId(),
             cliAction: Avo.CliAction.MERGE,
             cliInvokedByCi: invokedByCi(),
+            force: undefined,
           });
           throw error;
         });
@@ -1997,6 +2110,7 @@ yargs(hideBin(process.argv)) // eslint-disable-line no-unused-expressions
             return requireAuth(argv, () =>
               resolveAvoJsonConflicts(avoFile, {
                 argv,
+                skipPullMaster: false,
               }).then((json) => {
                 Avo.cliInvoked({
                   schemaId: json.schema.id,
@@ -2006,6 +2120,7 @@ yargs(hideBin(process.argv)) // eslint-disable-line no-unused-expressions
                   userId_: installIdOrUserId(),
                   cliAction: Avo.CliAction.CONFLICT,
                   cliInvokedByCi: invokedByCi(),
+                  force: undefined,
                 });
                 pull(null, json);
               }),
@@ -2023,6 +2138,7 @@ yargs(hideBin(process.argv)) // eslint-disable-line no-unused-expressions
             userId_: installIdOrUserId(),
             cliAction: Avo.CliAction.CONFLICT,
             cliInvokedByCi: invokedByCi(),
+            force: undefined,
           });
           return Promise.resolve(json);
         })
@@ -2035,6 +2151,7 @@ yargs(hideBin(process.argv)) // eslint-disable-line no-unused-expressions
             userId_: installIdOrUserId(),
             cliAction: Avo.CliAction.CONFLICT,
             cliInvokedByCi: invokedByCi(),
+            force: undefined,
           });
           throw error;
         }),
@@ -2043,7 +2160,7 @@ yargs(hideBin(process.argv)) // eslint-disable-line no-unused-expressions
     command: 'edit',
     desc: 'Open the Avo workspace in your browser',
     handler: (argv) => {
-      loadAvoJsonOrInit({ argv })
+      loadAvoJsonOrInit({ argv, skipInit: false, skipPullMaster: false })
         .then((json) => {
           Avo.cliInvoked({
             schemaId: json.schema.id,
@@ -2053,6 +2170,7 @@ yargs(hideBin(process.argv)) // eslint-disable-line no-unused-expressions
             userId_: installIdOrUserId(),
             cliAction: Avo.CliAction.EDIT,
             cliInvokedByCi: invokedByCi(),
+            force: undefined,
           });
 
           const { schema } = json;
@@ -2060,7 +2178,7 @@ yargs(hideBin(process.argv)) // eslint-disable-line no-unused-expressions
           report.info(
             `Opening ${cyan(schema.name)} workspace in Avo: ${link(schemaUrl)}`,
           );
-          opn(schemaUrl, { wait: false });
+          open(schemaUrl);
         })
         .catch((error) => {
           Avo.cliInvoked({
@@ -2071,6 +2189,7 @@ yargs(hideBin(process.argv)) // eslint-disable-line no-unused-expressions
             userId_: installIdOrUserId(),
             cliAction: Avo.CliAction.EDIT,
             cliInvokedByCi: invokedByCi(),
+            force: undefined,
           });
           throw error;
         });
@@ -2087,14 +2206,14 @@ yargs(hideBin(process.argv)) // eslint-disable-line no-unused-expressions
           return;
         }
         login()
-          .then((result) => {
+          .then((result: LoginResult) => {
             conf.set('user', result.user);
             conf.set('tokens', result.tokens);
 
             Avo.signedIn({
               userId_: result.user.user_id,
               email: result.user.email,
-              cliInvokedByCi: invokedByCi(),
+              authenticationMethod: Avo.AuthenticationMethod.CLI,
             });
 
             report.success(`Logged in as ${email(result.user.email)}`);
@@ -2104,7 +2223,6 @@ yargs(hideBin(process.argv)) // eslint-disable-line no-unused-expressions
               userId_: conf.get('avo_install_id'),
               emailInput: '', // XXX this is not passed back here
               signInError: Avo.SignInError.UNKNOWN,
-              cliInvokedByCi: invokedByCi(),
             });
           });
       };
@@ -2119,6 +2237,7 @@ yargs(hideBin(process.argv)) // eslint-disable-line no-unused-expressions
             userId_: installIdOrUserId(),
             cliAction: Avo.CliAction.LOGIN,
             cliInvokedByCi: invokedByCi(),
+            force: undefined,
           });
           command();
         })
@@ -2131,6 +2250,7 @@ yargs(hideBin(process.argv)) // eslint-disable-line no-unused-expressions
             userId_: installIdOrUserId(),
             cliAction: Avo.CliAction.LOGIN,
             cliInvokedByCi: invokedByCi(),
+            force: undefined,
           });
           command();
         });
@@ -2143,7 +2263,7 @@ yargs(hideBin(process.argv)) // eslint-disable-line no-unused-expressions
       const command = () => {
         const user = conf.get('user');
         const tokens = conf.get('tokens');
-        const currentToken = _.get(tokens, 'refreshToken');
+        const currentToken = tokens.refreshToken;
         const token = currentToken;
         api.setRefreshToken(token);
         if (token) {
@@ -2174,6 +2294,7 @@ yargs(hideBin(process.argv)) // eslint-disable-line no-unused-expressions
             userId_: installIdOrUserId(),
             cliAction: Avo.CliAction.LOGOUT,
             cliInvokedByCi: invokedByCi(),
+            force: undefined,
           });
           command();
         })
@@ -2186,6 +2307,7 @@ yargs(hideBin(process.argv)) // eslint-disable-line no-unused-expressions
             userId_: installIdOrUserId(),
             cliAction: Avo.CliAction.LOGOUT,
             cliInvokedByCi: invokedByCi(),
+            force: undefined,
           });
           command();
         });
@@ -2216,6 +2338,7 @@ yargs(hideBin(process.argv)) // eslint-disable-line no-unused-expressions
             userId_: installIdOrUserId(),
             cliAction: Avo.CliAction.WHOAMI,
             cliInvokedByCi: invokedByCi(),
+            force: undefined,
           });
           command();
         })
@@ -2228,6 +2351,7 @@ yargs(hideBin(process.argv)) // eslint-disable-line no-unused-expressions
             userId_: installIdOrUserId(),
             cliAction: Avo.CliAction.WHOAMI,
             cliInvokedByCi: invokedByCi(),
+            force: undefined,
           });
           command();
         });
@@ -2249,8 +2373,10 @@ process.on('unhandledRejection', (err) => {
       new AvoError(`Promise rejected with value: ${util.inspect(err)}`),
     );
   } else {
+    // @ts-ignore
     report.error(err.message);
   }
+  // @ts-ignore
   // console.error(err.stack);
 
   process.exit(1);
