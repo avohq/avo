@@ -247,8 +247,7 @@ function _request(options) {
             exit: 2,
           }),
         );
-      }
-      );
+      });
   });
 }
 
