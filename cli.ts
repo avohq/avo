@@ -1002,6 +1002,7 @@ function codegen(
         name: target.name,
         id: target.id,
         path: source.path,
+        interfacePath: source.interfacePath,
         branchId: target.branchId,
         updatedAt: target.updatedAt,
       };
@@ -1057,7 +1058,14 @@ function matchesSource(source, filter) {
 }
 
 type ApiSourcesResult = {
-  sources: [{ id: string; name: string; filenameHint: string }];
+  sources: [
+    {
+      id: string;
+      name: string;
+      filenameHint: string;
+      canHaveInterfaceFile: boolean;
+    },
+  ];
 };
 
 function selectSource(sourceToAdd, json) {
@@ -1139,22 +1147,77 @@ function selectSource(sourceToAdd, json) {
         });
       }
 
-      return inquirer.prompt(prompts).then((answer) => {
-        const relativePath = path.relative(
+      return inquirer.prompt(prompts).then(async (answer) => {
+        let answerSource: any;
+        if (sourceToAdd) {
+          answerSource = sources.find((soruceToFind) =>
+            matchesSource(soruceToFind, sourceToAdd),
+          );
+        } else {
+          answerSource = answer.source;
+        }
+        const moreAnswers = await inquirer.prompt(
+          answerSource.canHaveInterfaceFile === true
+            ? [
+                {
+                  type: 'fuzzypath',
+                  name: 'folder',
+                  excludePath: (maybeExcludePath) =>
+                    maybeExcludePath.startsWith('node_modules') ||
+                    maybeExcludePath.startsWith('.git'),
+                  itemType: 'directory',
+                  rootPath: '.',
+                  message:
+                    'Select a folder to save the analytics wrapper interface file in',
+                  default: '.',
+                  suggestOnly: false,
+                  depthLimit: 10,
+                },
+                {
+                  type: 'input',
+                  name: 'interfaceFilename',
+                  message: (_answers) =>
+                    'Select a filename for the analytics wrapper interface file',
+                  // @ts-ignore
+                  default() {
+                    return answerSource.filenameHint;
+                  },
+                },
+              ]
+            : [],
+        );
+        const hasMultiPath = moreAnswers.interfaceFilename != null;
+        const relativeMainPath = path.relative(
           process.cwd(),
           path.join(path.resolve(answer.folder), answer.filename),
         );
+        let relativeInterfacePath = relativeMainPath;
+        if (hasMultiPath) {
+          relativeInterfacePath = path.relative(
+            process.cwd(),
+            path.join(
+              path.resolve(answer.folder),
+              moreAnswers.interfaceFilename,
+            ),
+          );
+        }
         let source;
         if (sourceToAdd) {
           source = sources.find((sourceToFind) =>
             matchesSource(sourceToFind, sourceToAdd),
           );
-          source = { id: source.id, name: source.name, path: relativePath };
+          source = {
+            id: source.id,
+            name: source.name,
+            path: relativeMainPath,
+            interfacePath: relativeInterfacePath,
+          };
         } else {
           source = {
             id: answer.source.id,
             name: answer.source.name,
-            path: relativePath,
+            path: relativeMainPath,
+            interfacePath: relativeInterfacePath,
           };
         }
         sources = (json.sources ?? []).concat([source]);
@@ -1206,6 +1269,7 @@ function pull(sourceFilter, json) {
           sources: sources.map((source) => ({
             id: source.id,
             path: source.path,
+            interfacePath: source.interfacePath,
           })),
           force: json.force ?? false,
           forceFeatures: json.forceFeatures,
