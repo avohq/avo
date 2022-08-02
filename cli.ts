@@ -884,8 +884,7 @@ function resolveAvoJsonConflicts(avoFile, { argv, skipPullMaster }) {
         .then(([isDone, json]) => {
           if (!isDone && isIncomingBranchOpen && argv.force) {
             report.warn(
-              `Incoming branch, ${
-                incoming.branch.name
+              `Incoming branch, ${incoming.branch.name
               }, has not been merged to Avo main. To review and merge go to: ${link(
                 `https://www.avo.app/schemas/${nextAvoJson.schema.id}/branches/${incoming.branch.id}/diff`,
               )}`,
@@ -902,8 +901,7 @@ function resolveAvoJsonConflicts(avoFile, { argv, skipPullMaster }) {
               branchName: head.branch.name,
             });
             throw new Error(
-              `Incoming branch, ${
-                incoming.branch.name
+              `Incoming branch, ${incoming.branch.name
               }, has not been merged to Avo main.\n\nTo review and merge go to:\n${link(
                 `https://www.avo.app/schemas/${nextAvoJson.schema.id}/branches/${incoming.branch.id}/diff`,
               )}\n\nOnce merged, run 'avo pull'. To skip this check use the --force flag.`,
@@ -1002,6 +1000,7 @@ function codegen(
         name: target.name,
         id: target.id,
         path: source.path,
+        interfacePath: source.interfacePath,
         branchId: target.branchId,
         updatedAt: target.updatedAt,
       };
@@ -1036,8 +1035,7 @@ function codegen(
     }
 
     report.success(
-      `Analytics ${
-        targets.length > 1 ? 'wrappers' : 'wrapper'
+      `Analytics ${targets.length > 1 ? 'wrappers' : 'wrapper'
       } successfully updated`,
     );
     targets.forEach((target) => {
@@ -1057,20 +1055,31 @@ function matchesSource(source, filter) {
 }
 
 type ApiSourcesResult = {
-  sources: [{ id: string; name: string; filenameHint: string }];
+  sources: [
+    {
+      id: string;
+      name: string;
+      filenameHint: string;
+      canHaveInterfaceFile: boolean;
+    },
+  ];
 };
 
 function selectSource(sourceToAdd, json) {
   wait('Fetching sources');
   return api
-    .request('POST', '/c/v1/sources', {
-      origin: api.apiOrigin,
-      auth: true,
-      json: {
-        schemaId: json.schema.id,
-        branchId: json.branch.id,
+    .request(
+      'POST',
+      '/c/v1/sources',
+      {
+        origin: api.apiOrigin,
+        auth: true,
+        json: {
+          schemaId: json.schema.id,
+          branchId: json.branch.id,
+        },
       },
-    })
+    )
     .then((data: ApiSourcesResult) => {
       cancelWait();
       const existingSources = json.sources ?? [];
@@ -1139,22 +1148,77 @@ function selectSource(sourceToAdd, json) {
         });
       }
 
-      return inquirer.prompt(prompts).then((answer) => {
-        const relativePath = path.relative(
+      return inquirer.prompt(prompts).then(async (answer) => {
+        let answerSource: any;
+        if (sourceToAdd) {
+          answerSource = sources.find((soruceToFind) =>
+            matchesSource(soruceToFind, sourceToAdd),
+          );
+        } else {
+          answerSource = answer.source;
+        }
+        const moreAnswers = await inquirer.prompt(
+          answerSource.canHaveInterfaceFile === true
+            ? [
+              {
+                type: 'fuzzypath',
+                name: 'folder',
+                excludePath: (maybeExcludePath) =>
+                  maybeExcludePath.startsWith('node_modules') ||
+                  maybeExcludePath.startsWith('.git'),
+                itemType: 'directory',
+                rootPath: '.',
+                message:
+                  'Select a folder to save the analytics wrapper interface file in',
+                default: '.',
+                suggestOnly: false,
+                depthLimit: 10,
+              },
+              {
+                type: 'input',
+                name: 'interfaceFilename',
+                message: (_answers) =>
+                  'Select a filename for the analytics wrapper interface file',
+                // @ts-ignore
+                default() {
+                  return answerSource.filenameHint;
+                },
+              },
+            ]
+            : [],
+        );
+        const hasMultiPath = moreAnswers.interfaceFilename != null;
+        const relativeMainPath = path.relative(
           process.cwd(),
           path.join(path.resolve(answer.folder), answer.filename),
         );
+        let relativeInterfacePath = relativeMainPath;
+        if (hasMultiPath) {
+          relativeInterfacePath = path.relative(
+            process.cwd(),
+            path.join(
+              path.resolve(answer.folder),
+              moreAnswers.interfaceFilename,
+            ),
+          );
+        }
         let source;
         if (sourceToAdd) {
           source = sources.find((sourceToFind) =>
             matchesSource(sourceToFind, sourceToAdd),
           );
-          source = { id: source.id, name: source.name, path: relativePath };
+          source = {
+            id: source.id,
+            name: source.name,
+            path: relativeMainPath,
+            interfacePath: relativeInterfacePath,
+          };
         } else {
           source = {
             id: answer.source.id,
             name: answer.source.name,
-            path: relativePath,
+            path: relativeMainPath,
+            interfacePath: relativeInterfacePath,
           };
         }
         sources = (json.sources ?? []).concat([source]);
@@ -1206,6 +1270,7 @@ function pull(sourceFilter, json) {
           sources: sources.map((source) => ({
             id: source.id,
             path: source.path,
+            interfacePath: source.interfacePath,
           })),
           force: json.force ?? false,
           forceFeatures: json.forceFeatures,
@@ -1398,7 +1463,7 @@ function status(source, json, argv) {
               const globs = [
                 new Minimatch(
                   source.analysis?.glob ??
-                    `**/*.+(${sourcePathExts.join('|')})`,
+                  `**/*.+(${sourcePathExts.join('|')})`,
                   {},
                 ),
                 new Minimatch(`!${source.path}`, {}),
@@ -1448,15 +1513,14 @@ function status(source, json, argv) {
                 children:
                   Object.keys(results).length > 0
                     ? Object.entries(results).map(([matchFile, result]) => ({
-                        name: `used in ${matchFile}: ${result.length}${
-                          result.length === 1 ? ' time' : ' times'
+                      name: `used in ${matchFile}: ${result.length}${result.length === 1 ? ' time' : ' times'
                         }`,
-                      }))
+                    }))
                     : [
-                        {
-                          name: `${logSymbols.error} no usage found`,
-                        },
-                      ],
+                      {
+                        name: `${logSymbols.error} no usage found`,
+                      },
+                    ],
               }),
             ),
           })),
@@ -1485,15 +1549,13 @@ function status(source, json, argv) {
           }
         } else {
           report.info(
-            `${
-              totalEvents - missingEvents
+            `${totalEvents - missingEvents
             } of ${totalEvents} events seen in code`,
           );
         }
         if (missingEvents > 0) {
           report.error(
-            `${missingEvents} missing ${
-              missingEvents > 1 ? 'events' : 'event'
+            `${missingEvents} missing ${missingEvents > 1 ? 'events' : 'event'
             }`,
           );
           report.tree(
@@ -1504,10 +1566,10 @@ function status(source, json, argv) {
                 .map(([eventName, results]) =>
                   Object.keys(results).length === 0
                     ? [
-                        {
-                          name: `${red(eventName)}: no usage found`,
-                        },
-                      ]
+                      {
+                        name: `${red(eventName)}: no usage found`,
+                      },
+                    ]
                     : [],
                 )
                 .flat(),

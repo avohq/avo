@@ -1,5 +1,9 @@
 ## Unreleased
 
+## 3.1.0 (2022-08-01)
+
+Allow to provide separate file paths for the interface files
+
 ## 3.1.0 (2022-07-28)
 
 Added a 'forceFeatures' flag to the 'avo pull' command. You can provide a comma separated list of features you'd like to force enable.
