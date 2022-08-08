@@ -1,8 +1,12 @@
 ## Unreleased
 
-## 3.1.0 (2022-08-01)
+## 3.2.0 (2022-08-01)
 
-Allow to provide separate file paths for the interface files
+Allow to provide separate file paths for the interface files.
+
+## 3.1.1 (2022-07-28)
+
+Improved error messages.
 
 ## 3.1.0 (2022-07-28)
 
