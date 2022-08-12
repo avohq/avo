@@ -1,5 +1,11 @@
 ## Unreleased
 
+–
+
+## 3.2.1 (2022-08-12)
+
+Downgrade Inquirer to version 8, fixing an issue with `npm install`
+
 ## 3.2.0 (2022-08-01)
 
 Allow to provide separate file paths for the interface files.
