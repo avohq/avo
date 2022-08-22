@@ -1849,7 +1849,7 @@ yargs(hideBin(process.argv)) // eslint-disable-line no-unused-expressions
           type: 'boolean',
         })
         .option('forceFeatures', {
-          describe: 'Optional comma separated list of features to force enable',
+          describe: 'Optional comma separated list of features to force enable, pass unsupported name to get the list of available features',
           default: undefined,
           type: 'string',
         }),
