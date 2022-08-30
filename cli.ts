@@ -201,8 +201,20 @@ function responseToError(response) {
   }
 
   if (!body.error) {
+    const getMessage = (statusCode) => {
+      switch (statusCode) {
+        case 401:
+          return 'Unauthorized';
+        case 403:
+          return 'Forbidden. Do you have the required permissions? Some commands editor or admin access.';
+        case 404:
+          return 'Not Found';
+        default:
+          return 'Unknown Error';
+      }
+    };
     body.error = {
-      message: response.statusCode === 404 ? 'Not Found' : 'Unknown Error',
+      message: getMessage(response.statusCode),
     };
   }
 
