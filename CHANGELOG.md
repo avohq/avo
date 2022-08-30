@@ -1,6 +1,6 @@
 ## Unreleased
 
-–
+More helpful message when receiving a 403 server error
 
 ## 3.2.2 (2022-08-12)
 
