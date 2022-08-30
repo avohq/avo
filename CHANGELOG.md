@@ -2,6 +2,10 @@
 
 –
 
+## 3.2.2 (2022-08-12)
+
+Add instructions on how to get available features to force to `avo pull --help`
+
 ## 3.2.1 (2022-08-12)
 
 Downgrade Inquirer to version 8, fixing an issue with `npm install`
