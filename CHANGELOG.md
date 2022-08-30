@@ -1,9 +1,10 @@
 ## Unreleased
 
-More helpful message when receiving a 403 server error
+-
 
 ## 3.2.2 (2022-08-12)
 
+More helpful message when receiving a 403 server error
 Add instructions on how to get available features to force to `avo pull --help`
 
 ## 3.2.1 (2022-08-12)
