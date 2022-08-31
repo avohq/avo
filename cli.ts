@@ -206,7 +206,7 @@ function responseToError(response) {
         case 401:
           return 'Unauthorized';
         case 403:
-          return 'Forbidden. Do you have the required permissions? Some commands editor or admin access.';
+          return 'Forbidden. Do you have the required permissions? Some commands require editor or admin access.';
         case 404:
           return 'Not Found';
         default:
