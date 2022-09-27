@@ -1,6 +1,12 @@
+# Avo CLI
+
+Better event tracking, **faster**.
+
 ![https://www.avo.app](https://firebasestorage.googleapis.com/v0/b/avo-frontpage.appspot.com/o/logo%2Fassets%2Favo.png?alt=media&token=2acfd7bd-2faf-4787-a450-8f99c407a483)
 
-## Install
+The Avo CLI gives you access to [Avo Codegen](https://www.avo.app/docs/implementation/devs-101) right from your command line. It allows you to pull [your Avo tracking plan](http://avo.app/schemas/default) as type-safe functions for each of your events, making analytics implementation quick and seamless. Avo Codegen supports a variety of [platforms, programming languages and destinations](https://www.avo.app/docs/implementation/supported-programming-languages). 
+
+## Installation
 
 Avo runs on Node `>=14.16`. To install the latest version of Avo CLI, run this command:
 
@@ -15,6 +21,7 @@ $ avo --help
 avo command
 
 Commands:
+  avo login              Log into the Avo platform
   avo init               Initialize an Avo workspace in the current folder
   avo pull [source]      Pull analytics wrappers from Avo workspace
   avo checkout [branch]  Switch branches                               [aliases: branch]
@@ -23,7 +30,6 @@ Commands:
   avo merge main         Pull the Avo main branch into your current branch
   avo conflict           Resolve git conflicts in Avo files            [aliases: resolve, conflicts]
   avo edit               Open the Avo workspace in your browser
-  avo login              Log into the Avo platform
   avo logout             Log out from the Avo platform
   avo whoami             Shows the currently logged in username
 
@@ -34,24 +40,9 @@ Options:
   --help         Show help                                             [boolean]
 ```
 
-For more detailed documentation, visit [https://www.avo.app/docs/commands](https://www.avo.app/docs/commands)
+For more documentation, visit [https://www.avo.app/docs/implementation/cli](https://www.avo.app/docs/implementation/cli)
 
-## Caught a Bug?
 
-Thank you, you are precious to us :hug: Please send an email to friends@avo.app or file an issue here on GitHub.
+**Caught a Bug?** Thank you, you are precious to us :hug: Please create a issue on the GitHub repo or send an email to friends@avo.app. We'll do our best to resolve it quickly!
 
-## How to contribute
-
-Make your changes and add them to the _Unreleased_ section in CHANGELOG.md
-
-## How to Create a Release
-
-1. Verify that the changes in the _Unrelased_ section in CHANGELOG.md are accurate, create a new heading with the correct semantic version then move the content from the _Unreleased_ section there
-2. Update the semantic version in `package.json` to match the one you just created in the changelog
-3. Commit with the message "Release <version>" and push the changes
-4. Publish the package to npm (you'll need to be a maintainer of the avo project in npm)
-
-```
-npm publish
-```
-
+**To create a release:** Verify that the changes in the _Unreleased_ section in CHANGELOG.md are accurate, create a new heading with the correct semantic version then move the content from the _Unreleased_ section there • Update the semantic version in `package.json` to match the one you just created in the changelog • Commit with the message "Release <version>" and push the changes • Publish the package to npm (you'll need to be a maintainer of the avo project in npm): `npm publish`
