@@ -1262,10 +1262,10 @@ ieee754@^1.1.13, ieee754@^1.2.1:
   resolved "https://registry.yarnpkg.com/ieee754/-/ieee754-1.2.1.tgz#8eb7a10a63fff25d15a57b001586d177d1b0d352"
   integrity sha512-dcyqhDvX1C46lXZcVqCpK+FtMRQVdIMN6/Df5js2zouUsqG7I6sFxitIC+7KYK29KdXOLHdu9zL4sFnoVQnqaA==
 
-ignore-walk@^5.0.1:
-  version "5.0.1"
-  resolved "https://registry.yarnpkg.com/ignore-walk/-/ignore-walk-5.0.1.tgz#5f199e23e1288f518d90358d461387788a154776"
-  integrity sha512-yemi4pMf51WKT7khInJqAvsIGzoqYXblnsz0ql8tM+yi1EKYTY1evX4NAbJrLL/Aanr2HyZeluqU+Oi7MGHokw==
+ignore-walk@^6.0.0:
+  version "6.0.0"
+  resolved "https://registry.yarnpkg.com/ignore-walk/-/ignore-walk-6.0.0.tgz#1dd41c6eb4f661a49750a510a10c2cd934583fd8"
+  integrity sha512-bTf9UWe/UP1yxG3QUrj/KOvEhTAUWPcv+WvbFZ28LcqznXabp7Xu6o9y1JEC18+oqODuS7VhTpekV5XvFwsxJg==
   dependencies:
     minimatch "^5.0.1"
 
