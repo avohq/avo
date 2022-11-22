@@ -1850,7 +1850,6 @@ yargs(hideBin(process.argv)) // eslint-disable-line no-unused-expressions
       yargs
         .option('branch', {
           describe: 'Name of Avo branch to pull from',
-          default: 'main',
           type: 'string',
         })
         .option('f', {
