@@ -452,12 +452,47 @@ Avo.initAvo(
   customAnalyticsDestination,
 );
 
-function isLegacyAvoJson(json) {
+type Branch = {
+  name: string;
+  id: string;
+};
+type Schema = {
+  id: string;
+  name: string;
+};
+type Source = {
+  id: string;
+  name: string;
+  path: string;
+  actionId: string;
+  branchId: string;
+  updatedAt: string;
+  interfacePath?: string;
+  analysis?: {
+    glob: string;
+    module?: string;
+  };
+  filenameHint?: string;
+  canHaveInterfaceFile?: boolean;
+};
+
+type AvoJson = {
+  avo: {
+    version: number;
+  };
+  schema: Schema;
+  branch: Branch;
+  force?: boolean;
+  forceFeatures?: string;
+  sources?: Source[];
+};
+
+function isLegacyAvoJson(json): boolean {
   // check if legacy avo.json or un-initialized project
   return json.types ?? !json.schema;
 }
 
-function avoNeedsUpdate(json) {
+function avoNeedsUpdate(json: AvoJson): boolean {
   // if avo.json has version, and this binary has lower version number it needs updating
   return (
     json.avo && json.avo.version && semver.major(pkg.version) < json.avo.version
@@ -468,7 +503,7 @@ const MERGE_CONFLICT_ANCESTOR = '|||||||';
 const MERGE_CONFLICT_END = '>>>>>>>';
 const MERGE_CONFLICT_SEP = '=======';
 const MERGE_CONFLICT_START = '<<<<<<<';
-function hasMergeConflicts(str) {
+function hasMergeConflicts(str: string): boolean {
   return (
     str.includes(MERGE_CONFLICT_START) &&
     str.includes(MERGE_CONFLICT_SEP) &&
@@ -476,7 +511,7 @@ function hasMergeConflicts(str) {
   );
 }
 
-function extractConflictingFiles(str) {
+function extractConflictingFiles(str: string): [string, string] {
   const files = [[], []];
   const lines = str.split(/\r?\n/g);
   let skip = false;
@@ -513,12 +548,14 @@ function extractConflictingFiles(str) {
   return [files[0].join('\n'), files[1].join('\n')];
 }
 
-const BRANCH_UP_TO_DATE = 'branch-up-to-date';
-const BRANCH_NOT_UP_TO_DATE = 'branch-not-up-to-date';
+enum BranchStatus {
+  BRANCH_UP_TO_DATE = 'branch-up-to-date',
+  BRANCH_NOT_UP_TO_DATE = 'branch-not-up-to-date',
+}
 
-function getMasterStatus(json) {
+function getMasterStatus(json: AvoJson): Promise<BranchStatus> {
   if (json.branch.id === 'master') {
-    return Promise.resolve(BRANCH_UP_TO_DATE);
+    return Promise.resolve(BranchStatus.BRANCH_UP_TO_DATE);
   }
   return api
     .request('POST', '/c/v1/master', {
@@ -530,11 +567,13 @@ function getMasterStatus(json) {
       },
     })
     .then(({ pullRequired }) =>
-      pullRequired ? BRANCH_NOT_UP_TO_DATE : BRANCH_UP_TO_DATE,
+      pullRequired
+        ? BranchStatus.BRANCH_NOT_UP_TO_DATE
+        : BranchStatus.BRANCH_UP_TO_DATE,
     );
 }
 
-function pullMaster(json) {
+function pullMaster(json: AvoJson): Promise<AvoJson> {
   if (json.branch.name === 'main') {
     report.info('Your current branch is main');
     return Promise.resolve(json);
@@ -559,12 +598,12 @@ function pullMaster(json) {
     });
 }
 
-function promptPullMaster(json) {
+function promptPullMaster(json: AvoJson): Promise<AvoJson> {
   wait('Check if branch is up to date with main');
   return getMasterStatus(json)
     .then((branchStatus) => {
       cancelWait();
-      if (branchStatus === BRANCH_NOT_UP_TO_DATE) {
+      if (branchStatus === BranchStatus.BRANCH_NOT_UP_TO_DATE) {
         return inquirer
           .prompt([
             {
@@ -583,7 +622,7 @@ function promptPullMaster(json) {
       return Promise.resolve([branchStatus]);
     })
     .then(([branchStatus, answer]) => {
-      if (branchStatus === BRANCH_UP_TO_DATE) {
+      if (branchStatus === BranchStatus.BRANCH_UP_TO_DATE) {
         report.success('Branch is up to date with main');
         return Promise.resolve(json);
       }
@@ -595,7 +634,7 @@ function promptPullMaster(json) {
     });
 }
 
-function installIdOrUserId() {
+function installIdOrUserId(): string {
   const installId = conf.get('avo_install_id');
   const user = conf.get('user');
   if (user && user.user_id) {
@@ -604,11 +643,14 @@ function installIdOrUserId() {
   return installId;
 }
 
-function invokedByCi() {
+function invokedByCi(): boolean {
   return process.env.CI !== undefined;
 }
 
-function requireAuth(argv, cb) {
+function requireAuth<T>(
+  argv: { token?: string; user?: string; tokens?: any },
+  cb: () => T,
+): T {
   const tokens = conf.get('tokens');
   const user = conf.get('user');
 
@@ -631,14 +673,17 @@ function requireAuth(argv, cb) {
 }
 
 type ApiWorkspacesResult = {
-  workspaces: [{ lastUsedAt: number; name: string }];
+  workspaces: [{ lastUsedAt: number; name: string; id: string }];
 };
 
-function init() {
-  const makeAvoJson = (schema) => {
+function init(): Promise<AvoJson> {
+  const makeAvoJson = (schema: {
+    id: string;
+    name: string;
+  }): Promise<AvoJson> => {
     report.success(`Initialized for workspace ${cyan(schema.name)}`);
 
-    return {
+    return Promise.resolve({
       avo: {
         version: semver.major(pkg.version),
       },
@@ -650,9 +695,11 @@ function init() {
         id: 'master',
         name: 'main',
       },
-    };
+    });
   };
+
   wait('Initializing');
+
   return api
     .request('GET', '/c/v1/workspaces', {
       origin: api.apiOrigin,
@@ -692,7 +739,7 @@ function init() {
     });
 }
 
-function validateAvoJson(json) {
+function validateAvoJson(json: AvoJson): Promise<AvoJson> {
   if (avoNeedsUpdate(json)) {
     throw new AvoError('Your avo CLI is outdated, please update');
   }
@@ -702,14 +749,17 @@ function validateAvoJson(json) {
   }
 
   // augment the latest major version into avo.json
-  return { ...json, avo: { ...json.avo, version: semver.major(pkg.version) } };
+  return Promise.resolve({
+    ...json,
+    avo: { ...json.avo, version: semver.major(pkg.version) },
+  });
 }
 
 type ApiBranchesResult = {
   branches: [{ name: string; id: string }];
 };
 
-function fetchBranches(json) {
+function fetchBranches(json: AvoJson): Promise<Branch[]> {
   wait('Fetching open branches');
   const payload = {
     origin: api.apiOrigin,
@@ -735,7 +785,7 @@ function fetchBranches(json) {
     });
 }
 
-function checkout(branchToCheckout, json) {
+function checkout(branchToCheckout: string, json: AvoJson): Promise<AvoJson> {
   return fetchBranches(json).then((branches) => {
     if (!branchToCheckout) {
       const choices = branches.map((branch) => ({
@@ -807,7 +857,10 @@ function checkout(branchToCheckout, json) {
   });
 }
 
-function resolveAvoJsonConflicts(avoFile, { argv, skipPullMaster }) {
+function resolveAvoJsonConflicts(
+  avoFile: string,
+  { argv, skipPullMaster }: { argv: any; skipPullMaster: boolean },
+): Promise<AvoJson> {
   report.info('Resolving Avo merge conflicts');
   const files = extractConflictingFiles(avoFile);
   const head = JSON.parse(files[0]);
@@ -946,7 +999,7 @@ function resolveAvoJsonConflicts(avoFile, { argv, skipPullMaster }) {
   );
 }
 
-function loadAvoJson() {
+function loadAvoJson(): Promise<AvoJson> {
   return loadJsonFile('avo.json')
     .then(validateAvoJson)
     .catch((err) => {
@@ -960,7 +1013,11 @@ function loadAvoJson() {
     });
 }
 
-function loadAvoJsonOrInit({ argv, skipPullMaster, skipInit }) {
+function loadAvoJsonOrInit({
+  argv,
+  skipPullMaster,
+  skipInit,
+}): Promise<AvoJson> {
   return pify(fs.readFile)('avo.json', 'utf8')
     .then((avoFile) => {
       if (hasMergeConflicts(avoFile)) {
@@ -993,7 +1050,7 @@ function loadAvoJsonOrInit({ argv, skipPullMaster, skipInit }) {
     });
 }
 
-function writeAvoJson(json) {
+function writeAvoJson(json: AvoJson): Promise<AvoJson> {
   return writeJsonFile('avo.json', json, {
     indent: 2,
   }).then(() => json);
@@ -1080,7 +1137,7 @@ type ApiSourcesResult = {
   ];
 };
 
-function selectSource(sourceToAdd, json) {
+function selectSource(sourceToAdd: string, json: AvoJson) {
   wait('Fetching sources');
   return api
     .request('POST', '/c/v1/sources', {
@@ -1094,7 +1151,7 @@ function selectSource(sourceToAdd, json) {
     .then((data: ApiSourcesResult) => {
       cancelWait();
       const existingSources = json.sources ?? [];
-      let sources = data.sources
+      const sources = data.sources
         .filter((source) => !existingSources.find(({ id }) => source.id === id))
         .sort((a, b) => {
           if (a.name < b.name) return -1;
@@ -1232,8 +1289,8 @@ function selectSource(sourceToAdd, json) {
             interfacePath: relativeInterfacePath,
           };
         }
-        sources = (json.sources ?? []).concat([source]);
-        const newJson = { ...json, sources };
+
+        const newJson = { ...json, sources: [...json.sources, source] };
         report.info(`Added source ${source.name} to the project`);
         report.info(
           `Run 'avo pull "${source.name}"' to pull the latest analytics wrapper for this source`,
@@ -1255,7 +1312,7 @@ type ApiPullResult = {
   schema: object;
 };
 
-function pull(sourceFilter, json) {
+function pull(sourceFilter, json: AvoJson): Promise<void> {
   const sources = sourceFilter
     ? [json.sources.find((source) => matchesSource(source, sourceFilter))]
     : json.sources;
@@ -1264,7 +1321,7 @@ function pull(sourceFilter, json) {
 
   return getMasterStatus(json)
     .then((masterStatus) => {
-      if (masterStatus === BRANCH_NOT_UP_TO_DATE) {
+      if (masterStatus === BranchStatus.BRANCH_NOT_UP_TO_DATE) {
         report.warn(
           `Your branch '${json.branch.name}' is not up to date with Avo main. To merge latest Avo main into the branch, run 'avo merge main'.`,
         );
@@ -1306,7 +1363,13 @@ function pull(sourceFilter, json) {
     });
 }
 
-function findMatches(data, regex) {
+type FileMatch = {
+  line: number;
+  start: number;
+  end: number;
+  lineContents: string;
+};
+function findMatches(data: string, regex: RegExp): FileMatch[] {
   const isGlobal = regex.global;
   const lines = data.split('\n');
   const fileMatches = [];
@@ -1340,7 +1403,7 @@ function findMatches(data, regex) {
   return fileMatches;
 }
 
-function getEventMap(data) {
+function getEventMap(data: string): string[] | null {
   const searchFor = 'AVOEVENTMAP:';
   const lines = data.split('\n').filter((line) => line.indexOf(searchFor) > -1);
   if (lines.length === 1) {
@@ -1354,7 +1417,7 @@ function getEventMap(data) {
   return null;
 }
 
-function getModuleMap(data) {
+function getModuleMap(data: string): string[] | null {
   const searchFor = 'AVOMODULEMAP:';
   const lines = data.split('\n').filter((line) => line.indexOf(searchFor) > -1);
   if (lines.length === 1) {
@@ -1368,7 +1431,7 @@ function getModuleMap(data) {
   return null;
 }
 
-function getSource(argv, json) {
+function getSource(argv, json: AvoJson): Promise<[string, AvoJson]> {
   if (!json.sources || !json.sources.length) {
     report.info('No sources configured.');
     return requireAuth(argv, () => {
@@ -1396,7 +1459,7 @@ function getSource(argv, json) {
   return Promise.resolve([argv.source, json]);
 }
 
-function status(source, json, argv) {
+function status(source: string, json, argv: any): void {
   let sources = source
     ? json.sources.filter((s) => matchesSource(s, source))
     : json.sources;
@@ -1471,7 +1534,7 @@ function status(source, json, argv) {
                 );
               }
 
-              const globs = [
+              const globs: minimatch.Minimatch[] = [
                 new Minimatch(
                   source.analysis?.glob ??
                     `**/*.+(${sourcePathExts.join('|')})`,
@@ -1480,7 +1543,7 @@ function status(source, json, argv) {
                 new Minimatch(`!${source.path}`, {}),
               ];
 
-              const lookup = {};
+              const lookup: { [key: string]: string } = {};
               Object.entries(cache).forEach(([cachePath, value]) => {
                 if (globs.every((mm) => mm.match(cachePath))) {
                   lookup[cachePath] = value;
@@ -1607,20 +1670,23 @@ function status(source, json, argv) {
 /// //////////////////////////////////////////////////////////////////////
 // AUTH
 
-function _getLoginUrl(callbackUrl) {
+function _getLoginUrl(callbackUrl: string): string {
   return `${api.authOrigin}/auth/cli?state=${encodeURIComponent(
     nonce,
   )}&redirect_uri=${encodeURIComponent(callbackUrl)}`;
 }
 
-function _getCallbackUrl(port?: number) {
+function _getCallbackUrl(port?: number): string {
   if (port === undefined) {
     return 'urn:ietf:wg:oauth:2.0:oob';
   }
   return `http://localhost:${port}`;
 }
 
-function _getTokensFromAuthorizationCode(code, callbackUrl) {
+function _getTokensFromAuthorizationCode(
+  code: string | string[],
+  callbackUrl: string,
+): Promise<LastAccessToken> {
   return api
     .request('POST', '/auth/token', {
       origin: api.apiOrigin,
@@ -1646,7 +1712,11 @@ function _getTokensFromAuthorizationCode(code, callbackUrl) {
     );
 }
 
-function _respondWithRedirect(req, res, Location) {
+function _respondWithRedirect(
+  req: http.IncomingMessage,
+  res: http.ServerResponse<http.IncomingMessage>,
+  Location: string,
+): Promise<void> {
   return new Promise<void>((resolve) => {
     res.writeHead(302, { Location });
     res.end();
@@ -1745,7 +1815,7 @@ function login() {
   return _getPort().then(_loginWithLocalhost, _loginWithoutLocalhost);
 }
 
-function logout(refreshToken) {
+function logout(refreshToken: string): void {
   if (lastAccessToken.refreshToken === refreshToken) {
     lastAccessToken = {};
   }
@@ -1850,7 +1920,6 @@ yargs(hideBin(process.argv)) // eslint-disable-line no-unused-expressions
       yargs
         .option('branch', {
           describe: 'Name of Avo branch to pull from',
-          default: 'main',
           type: 'string',
         })
         .option('f', {
