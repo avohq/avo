@@ -218,8 +218,9 @@ function responseToError(response) {
     };
   }
 
-  const message = `HTTP Error: ${response.statusCode}, ${body.error.message ?? body.error
-    }`;
+  const message = `HTTP Error: ${response.statusCode}, ${
+    body.error.message ?? body.error
+  }`;
 
   let exitCode;
   if (response.statusCode >= 500) {
@@ -948,7 +949,8 @@ function resolveAvoJsonConflicts(
         .then(([isDone, json]) => {
           if (!isDone && isIncomingBranchOpen && argv.force) {
             report.warn(
-              `Incoming branch, ${incoming.branch.name
+              `Incoming branch, ${
+                incoming.branch.name
               }, has not been merged to Avo main. To review and merge go to: ${link(
                 `https://www.avo.app/schemas/${nextAvoJson.schema.id}/branches/${incoming.branch.id}/diff`,
               )}`,
@@ -965,7 +967,8 @@ function resolveAvoJsonConflicts(
               branchName: head.branch.name,
             });
             throw new Error(
-              `Incoming branch, ${incoming.branch.name
+              `Incoming branch, ${
+                incoming.branch.name
               }, has not been merged to Avo main.\n\nTo review and merge go to:\n${link(
                 `https://www.avo.app/schemas/${nextAvoJson.schema.id}/branches/${incoming.branch.id}/diff`,
               )}\n\nOnce merged, run 'avo pull'. To skip this check use the --force flag.`,
@@ -1103,7 +1106,8 @@ function codegen(
     }
 
     report.success(
-      `Analytics ${targets.length > 1 ? 'wrappers' : 'wrapper'
+      `Analytics ${
+        targets.length > 1 ? 'wrappers' : 'wrapper'
       } successfully updated`,
     );
     targets.forEach((target) => {
@@ -1224,31 +1228,31 @@ function selectSource(sourceToAdd: string, json: AvoJson) {
         const moreAnswers = await inquirer.prompt(
           answerSource.canHaveInterfaceFile === true
             ? [
-              {
-                type: 'fuzzypath',
-                name: 'folder',
-                excludePath: (maybeExcludePath) =>
-                  maybeExcludePath.startsWith('node_modules') ||
-                  maybeExcludePath.startsWith('.git'),
-                itemType: 'directory',
-                rootPath: '.',
-                message:
-                  'Select a folder to save the analytics wrapper interface file in',
-                default: '.',
-                suggestOnly: false,
-                depthLimit: 10,
-              },
-              {
-                type: 'input',
-                name: 'interfaceFilename',
-                message: (_answers) =>
-                  'Select a filename for the analytics wrapper interface file',
-                // @ts-ignore
-                default() {
-                  return answerSource.filenameHint;
+                {
+                  type: 'fuzzypath',
+                  name: 'folder',
+                  excludePath: (maybeExcludePath) =>
+                    maybeExcludePath.startsWith('node_modules') ||
+                    maybeExcludePath.startsWith('.git'),
+                  itemType: 'directory',
+                  rootPath: '.',
+                  message:
+                    'Select a folder to save the analytics wrapper interface file in',
+                  default: '.',
+                  suggestOnly: false,
+                  depthLimit: 10,
                 },
-              },
-            ]
+                {
+                  type: 'input',
+                  name: 'interfaceFilename',
+                  message: (_answers) =>
+                    'Select a filename for the analytics wrapper interface file',
+                  // @ts-ignore
+                  default() {
+                    return answerSource.filenameHint;
+                  },
+                },
+              ]
             : [],
         );
         const hasMultiPath = moreAnswers.interfaceFilename != null;
@@ -1347,7 +1351,8 @@ function pull(sourceFilter, json: AvoJson): Promise<void> {
         codegen(json, result);
       } else {
         report.error(
-          `Branch ${result.branchName} was ${result.reason
+          `Branch ${result.branchName} was ${
+            result.reason
           } ${dateFns.formatDistance(
             new Date(),
             new Date(result.closedAt),
@@ -1532,7 +1537,7 @@ function status(source: string, json, argv: any): void {
               const globs: minimatch.Minimatch[] = [
                 new Minimatch(
                   source.analysis?.glob ??
-                  `**/*.+(${sourcePathExts.join('|')})`,
+                    `**/*.+(${sourcePathExts.join('|')})`,
                   {},
                 ),
                 new Minimatch(`!${source.path}`, {}),
@@ -1582,14 +1587,15 @@ function status(source: string, json, argv: any): void {
                 children:
                   Object.keys(results).length > 0
                     ? Object.entries(results).map(([matchFile, result]) => ({
-                      name: `used in ${matchFile}: ${result.length}${result.length === 1 ? ' time' : ' times'
+                        name: `used in ${matchFile}: ${result.length}${
+                          result.length === 1 ? ' time' : ' times'
                         }`,
-                    }))
+                      }))
                     : [
-                      {
-                        name: `${logSymbols.error} no usage found`,
-                      },
-                    ],
+                        {
+                          name: `${logSymbols.error} no usage found`,
+                        },
+                      ],
               }),
             ),
           })),
@@ -1618,13 +1624,15 @@ function status(source: string, json, argv: any): void {
           }
         } else {
           report.info(
-            `${totalEvents - missingEvents
+            `${
+              totalEvents - missingEvents
             } of ${totalEvents} events seen in code`,
           );
         }
         if (missingEvents > 0) {
           report.error(
-            `${missingEvents} missing ${missingEvents > 1 ? 'events' : 'event'
+            `${missingEvents} missing ${
+              missingEvents > 1 ? 'events' : 'event'
             }`,
           );
           report.tree(
@@ -1635,10 +1643,10 @@ function status(source: string, json, argv: any): void {
                 .map(([eventName, results]) =>
                   Object.keys(results).length === 0
                     ? [
-                      {
-                        name: `${red(eventName)}: no usage found`,
-                      },
-                    ]
+                        {
+                          name: `${red(eventName)}: no usage found`,
+                        },
+                      ]
                     : [],
                 )
                 .flat(),
