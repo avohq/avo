@@ -1057,10 +1057,10 @@ function writeAvoJson(json: AvoJson): Promise<AvoJson> {
 }
 
 function codegen(
-  json,
+  json: AvoJson,
   { schema, sources: targets, warnings, success, errors },
 ) {
-  const newJson = { ...JSON.parse(JSON.stringify(json)), schema };
+  const newJson: AvoJson = { ...JSON.parse(JSON.stringify(json)), schema };
 
   newJson.sources = newJson.sources.map((source) => {
     const target = targets.find(({ id }) => id === source.id);
@@ -1290,7 +1290,7 @@ function selectSource(sourceToAdd: string, json: AvoJson) {
           };
         }
 
-        const newJson = { ...json, sources: [...json.sources, source] };
+        const newJson = { ...json, sources: [...(json.sources ?? []), source] };
         report.info(`Added source ${source.name} to the project`);
         report.info(
           `Run 'avo pull "${source.name}"' to pull the latest analytics wrapper for this source`,
