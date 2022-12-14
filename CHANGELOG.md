@@ -2,6 +2,10 @@
 
 -
 
+## 3.2.4 (2022-12-14)
+
+Fix bug causing `avo pull "[source]"` to fail when it's the first source
+
 ## 3.2.3 (2022-11-22)
 
 Fix bug in `avo pull` where when `--branch` wasn't supplied as a parameter
