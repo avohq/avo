@@ -37,7 +37,7 @@
     "ignore-walk": "^5.0.1",
     "inquirer": "^8.0.0",
     "inquirer-fuzzy-path": "^2.3.0",
-    "jsonwebtoken": "^8.4.0",
+    "jsonwebtoken": "^9.0.0",
     "load-json-file": "^7.0.1",
     "log-symbols": "^5.1.0",
     "minimatch": "^5.1.0",
