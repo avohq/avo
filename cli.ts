@@ -1,3 +1,4 @@
+#!/usr/bin/env node
 import ora from 'ora';
 import chalk from 'chalk';
 import minimatch from 'minimatch';
