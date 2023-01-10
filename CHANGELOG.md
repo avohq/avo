@@ -2,6 +2,10 @@
 
 -
 
+## 3.2.6 (2023-01-10)
+
+Revert shebang removal
+
 ## 3.2.5 (2023-01-10)
 
 Update dependencies
