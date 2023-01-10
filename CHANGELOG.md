@@ -2,6 +2,11 @@
 
 -
 
+## 3.2.5 (2023-01-10)
+
+Update dependencies
+Remove unused shebang line
+
 ## 3.2.4 (2022-12-14)
 
 Fix bug causing `avo pull "[source]"` to fail when it's the first source
