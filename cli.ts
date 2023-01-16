@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import ora from 'ora';
 import chalk from 'chalk';
-import {Minimatch} from 'minimatch';
+import { Minimatch } from 'minimatch';
 import dateFns from 'date-fns';
 import fs from 'fs';
 import http from 'http';
