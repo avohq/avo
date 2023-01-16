@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import ora from 'ora';
 import chalk from 'chalk';
-import minimatch from 'minimatch';
+import {Minimatch} from 'minimatch';
 import dateFns from 'date-fns';
 import fs from 'fs';
 import http from 'http';
@@ -44,8 +44,6 @@ declare global {
 const pkg = JSON.parse(
   fs.readFileSync(new URL('package.json', import.meta.url), 'utf-8'),
 );
-
-const { Minimatch } = minimatch;
 
 /// //////////////////////////////////////////////////////////////////////
 // LOGGING
@@ -1534,7 +1532,7 @@ function status(source: string, json, argv: any): void {
                 );
               }
 
-              const globs: minimatch.Minimatch[] = [
+              const globs: Minimatch[] = [
                 new Minimatch(
                   source.analysis?.glob ??
                     `**/*.+(${sourcePathExts.join('|')})`,
