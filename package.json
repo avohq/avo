@@ -40,7 +40,7 @@
     "jsonwebtoken": "^9.0.0",
     "load-json-file": "^7.0.1",
     "log-symbols": "^5.1.0",
-    "minimatch": "^5.1.0",
+    "minimatch": "^6.0.4",
     "node-avo-inspector": "^1.0.1",
     "open": "^8.4.0",
     "ora": "^6.0.1",
