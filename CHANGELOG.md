@@ -2,6 +2,11 @@
 
 -
 
+## 3.2.7-beta.0 (2023-01-23)
+
+Update dependencies
+Better support for UNC paths on Windows
+
 ## 3.2.6 (2023-01-10)
 
 Revert shebang removal
