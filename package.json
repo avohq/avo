@@ -17,7 +17,7 @@
     "node": ">=14.16"
   },
   "scripts": {
-    "postinstall": "node cli.js track-install; true",
+    "postinstall": "node cli.js track-install",
     "prepublishOnly": "npm run compile",
     "lint": "eslint cli.ts",
     "format": "prettier --write cli.ts",
