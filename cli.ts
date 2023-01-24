@@ -632,18 +632,10 @@ function promptPullMaster(json: AvoJson): Promise<AvoJson> {
     });
 }
 
-function installIdOrUserId(): string {
-  const installId = conf.get('avo_install_id');
-  const user = conf.get('user');
-  if (user && user.user_id) {
-    return user.user_id;
-  }
-  return installId;
-}
+const installIdOrUserId = (): string =>
+  conf.get('user')?.user_id ?? conf.get('avo_install_id');
 
-function invokedByCi(): boolean {
-  return process.env.CI !== undefined;
-}
+const invokedByCi = (): boolean => process.env.CI !== undefined;
 
 function requireAuth<T>(
   argv: { token?: string; user?: string; tokens?: any },
@@ -1842,10 +1834,14 @@ yargs(hideBin(process.argv)) // eslint-disable-line no-unused-expressions
   .command({
     command: 'track-install',
     desc: false,
-    handler: () => {
+    handler: async (argv) => {
       Avo.cliInstalled({
         userId_: installIdOrUserId(),
         cliInvokedByCi: invokedByCi(),
+      }).catch((error) => {
+        if (argv.verbose) {
+          console.error('Failed to track cli installed', error);
+        }
       });
     },
   })
