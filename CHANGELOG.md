@@ -1,5 +1,9 @@
 ## Unreleased
 
+
+## 3.2.7-beta.1 (2023-02-21)
+
+Update dependencies
 Better cross-platform support for post install step
 
 ## 3.2.7-beta.0 (2023-01-23)
