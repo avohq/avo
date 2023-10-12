@@ -1843,10 +1843,10 @@ yargs(hideBin(process.argv)) // eslint-disable-line no-unused-expressions
           if (argv.verbose) {
             console.error('Request to track cli installed failed', error);
           }
-        })
+        });
       } catch (error) {
         console.error('Unexpected error failed to track cli installed', error);
-      };
+      }
     },
   })
   .command({
