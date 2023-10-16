@@ -1,5 +1,8 @@
 ## Unreleased
 
+## 3.2.8 (2023-10-13)
+Update dependencies
+Wrap post-install script in try-catch to prevent unexpected errors during installation
 
 ## 3.2.7-beta.1 (2023-02-21)
 

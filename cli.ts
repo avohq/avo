@@ -1835,14 +1835,18 @@ yargs(hideBin(process.argv)) // eslint-disable-line no-unused-expressions
     command: 'track-install',
     desc: false,
     handler: async (argv) => {
-      Avo.cliInstalled({
-        userId_: installIdOrUserId(),
-        cliInvokedByCi: invokedByCi(),
-      }).catch((error) => {
-        if (argv.verbose) {
-          console.error('Failed to track cli installed', error);
-        }
-      });
+      try {
+        Avo.cliInstalled({
+          userId_: installIdOrUserId(),
+          cliInvokedByCi: invokedByCi(),
+        }).catch((error) => {
+          if (argv.verbose) {
+            console.error('Request to track cli installed failed', error);
+          }
+        });
+      } catch (error) {
+        console.error('Unexpected error failed to track cli installed', error);
+      }
     },
   })
   .command({
