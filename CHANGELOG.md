@@ -1,6 +1,6 @@
 ## Unreleased
 
-## 3.2.9-beta.0 (2023-10-23)
+## 3.2.9-beta.1 (2023-10-23)
 Address error in request lib if response is undefined
 
 ## 3.2.8 (2023-10-13)
