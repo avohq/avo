@@ -47,7 +47,7 @@
     "pify": "^6.0.0",
     "portfinder": "^1.0.28",
     "semver": "^7.3.7",
-    "update-notifier": "^6.0.2",
+    "update-notifier": "^7.0.0",
     "uuid": "^9.0.0",
     "write": "^2.0.0",
     "write-json-file": "^5.0.0",
