@@ -32,7 +32,7 @@
     "chalk": "^5.0.1",
     "configstore": "^6.0.0",
     "date-fns": "^2.28.0",
-    "got": "^12.1.0",
+    "got": "^14.0.0",
     "http-shutdown": "^1.2.0",
     "ignore-walk": "^5.0.1",
     "inquirer": "^8.0.0",
