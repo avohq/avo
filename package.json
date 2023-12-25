@@ -42,7 +42,7 @@
     "log-symbols": "^5.1.0",
     "minimatch": "^7.0.0",
     "node-avo-inspector": "^1.0.1",
-    "open": "^9.1.0",
+    "open": "^10.0.1",
     "ora": "^6.0.1",
     "pify": "^6.0.0",
     "portfinder": "^1.0.28",
