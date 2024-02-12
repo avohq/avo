@@ -247,7 +247,10 @@ function _request(options) {
         if (response.statusCode >= 400) {
           return reject(responseToError(response));
         }
-        return resolve(JSON.parse(response.body));
+        if (response && response.body) {
+          return resolve(JSON.parse(response.body));
+        }
+        return reject(responseToError(response));
       })
       .catch((err) => {
         report.error(`${responseToError(err.response)}\n`);
