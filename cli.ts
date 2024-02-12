@@ -176,7 +176,11 @@ let refreshToken;
 /// //////////////////////////////////////////////////////////////////////
 // REQUEST HANDLING
 
-function responseToError(response) {
+function responseToError(response, error) {
+  if (response === undefined) {
+    return new AvoError(error, {});
+  }
+
   let { body } = response;
   if (typeof body === 'string' && response.statusCode === 404) {
     body = {
@@ -245,12 +249,12 @@ function _request(options) {
     got(options)
       .then((response) => {
         if (response.statusCode >= 400) {
-          return reject(responseToError(response));
+          return reject(responseToError(response, null));
         }
         return resolve(JSON.parse(response.body));
       })
       .catch((err) => {
-        report.error(`${responseToError(err.response)}\n`);
+        report.error(`${responseToError(err.response, err)}\n`);
         reject(
           new AvoError(`Server Error. ${err.message}`, {
             original: err,
