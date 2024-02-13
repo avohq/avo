@@ -177,7 +177,7 @@ let refreshToken;
 // REQUEST HANDLING
 
 function responseToError(response, error) {
-  if (response === undefined) {
+  if (!response) {
     return new AvoError(error, {});
   }
 
