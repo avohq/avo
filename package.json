@@ -1,6 +1,6 @@
 {
   "name": "avo",
-  "version": "3.2.8",
+  "version": "3.2.9",
   "type": "module",
   "description": "The command-line interface for Avo",
   "author": "Avo (https://www.avo.app)",

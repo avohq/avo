@@ -1,5 +1,7 @@
 ## Unreleased
 
+## 3.2.9 (2024-02-13)
+
 Improve error messages
 
 ## 3.2.8 (2023-10-13)
