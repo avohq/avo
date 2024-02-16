@@ -1,5 +1,7 @@
 ## Unreleased
 
+More info in the verbose logs
+
 ## 3.2.9 (2024-02-13)
 
 Improve error messages

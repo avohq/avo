@@ -1397,7 +1397,7 @@ function findMatches(data: string, regex: RegExp): FileMatch[] {
   return fileMatches;
 }
 
-function getEventMap(data: string): string[] | null {
+function getEventMap(data: string, verbose: boolean): string[] | null {
   const searchFor = 'AVOEVENTMAP:';
   const lines = data.split('\n').filter((line) => line.indexOf(searchFor) > -1);
   if (lines.length === 1) {
@@ -1408,10 +1408,13 @@ function getEventMap(data: string): string[] | null {
     const eventMap = JSON.parse(line);
     return eventMap;
   }
+  if (verbose) {
+    report.error('No event map found');
+  }
   return null;
 }
 
-function getModuleMap(data: string): string[] | null {
+function getModuleMap(data: string, verbose: boolean): string[] | null {
   const searchFor = 'AVOMODULEMAP:';
   const lines = data.split('\n').filter((line) => line.indexOf(searchFor) > -1);
   if (lines.length === 1) {
@@ -1421,6 +1424,9 @@ function getModuleMap(data: string): string[] | null {
     line = line.substring(line.indexOf('"'), line.lastIndexOf('"') + 1);
     const moduleMap = JSON.parse(line);
     return moduleMap;
+  }
+  if (verbose) {
+    report.error('No module map found');
   }
   return null;
 }
@@ -1467,15 +1473,24 @@ function status(source: string, json, argv: any): void {
       results
         .filter((result) => !result.startsWith('.git'))
         .map((resultPath) =>
-          pify(fs.lstat)(resultPath).then((stats) => {
-            if (stats.isSymbolicLink()) {
-              return [];
-            }
-            return pify(fs.readFile)(resultPath, 'utf8').then((data) => [
-              resultPath,
-              data,
-            ]);
-          }),
+          pify(fs.lstat)(resultPath)
+            .then((stats) => {
+              if (stats.isSymbolicLink()) {
+                return [];
+              }
+              return pify(fs.readFile)(resultPath, 'utf8')
+                .then((data) => [resultPath, data])
+                .catch((error) => {
+                  if (argv.verbose) {
+                    report.warn(`Failed to parse file: ${resultPath}`, error);
+                  }
+                });
+            })
+            .catch((error) => {
+              if (argv.verbose) {
+                report.warn(`Failed to read file stats: ${resultPath}`, error);
+              }
+            }),
         ),
     ).then((cachePairs) => Object.fromEntries(cachePairs)),
   );
@@ -1485,9 +1500,9 @@ function status(source: string, json, argv: any): void {
       sources = Promise.all(
         sources.map((source) =>
           pify(fs.readFile)(source.path, 'utf8').then((data) => {
-            const eventMap = getEventMap(data);
+            const eventMap = getEventMap(data, argv.verbose);
             if (eventMap !== null) {
-              const moduleMap = getModuleMap(data);
+              const moduleMap = getModuleMap(data, argv.verbose);
               const sourcePath = path.parse(source.path);
               const moduleName =
                 source.analysis?.module ??
@@ -1544,6 +1559,18 @@ function status(source: string, json, argv: any): void {
                 }
               });
 
+              if (argv.verbose) {
+                const combinedPaths: string[] = [];
+
+                Object.entries(lookup).forEach(([path, _data]) => {
+                  combinedPaths.push(path);
+                });
+
+                report.info(`Looking for events: ${eventMap.join('\n')}`);
+                report.info(`Looking in module: ${moduleName}`);
+                report.info(`Looking in files: ${combinedPaths.join('\n')}`);
+              }
+
               return Promise.all(
                 eventMap.map((eventName) => {
                   const re = new RegExp(
@@ -1551,9 +1578,6 @@ function status(source: string, json, argv: any): void {
                   );
                   const results = Object.entries(lookup)
                     .map(([path, data]) => {
-                      if (argv.verbose) {
-                        report.info(`Looking for events in ${path}`);
-                      }
                       const results = findMatches(data, re);
                       return results.length ? [[path, results]] : [];
                     })
