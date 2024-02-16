@@ -1,5 +1,7 @@
 ## Unreleased
 
+## 3.2.10 (2024-02-16)
+
 More info in the verbose logs
 
 ## 3.2.9 (2024-02-13)
