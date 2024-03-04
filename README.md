@@ -2,7 +2,7 @@
 
 Better event tracking, **faster**.
 
-![https://www.avo.app](https://cdn.avo.app/assets/avo-cado.png)
+![https://www.avo.app](https://cdn.avo.app/assets/avo-find-fix-prevent.png)
 
 The Avo CLI gives you access to [Avo Codegen](https://www.avo.app/docs/implementation/devs-101) right from your command line. It allows you to pull [your Avo tracking plan](http://avo.app/schemas/default) as type-safe functions for each of your events, making analytics implementation quick and seamless. Avo Codegen supports a variety of [platforms, programming languages and destinations](https://www.avo.app/docs/implementation/supported-programming-languages). 
 
