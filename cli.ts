@@ -15,7 +15,6 @@ import pify from 'pify';
 import portfinder from 'portfinder';
 import querystring from 'querystring';
 import got from 'got'; // eslint-disable-line import/no-unresolved
-import report from 'yurnalist';
 import semver from 'semver';
 import updateNotifier from 'update-notifier';
 import url from 'url';
@@ -31,6 +30,7 @@ import { hideBin } from 'yargs/helpers';
 import httpShutdown from 'http-shutdown';
 import fuzzypath from 'inquirer-fuzzy-path';
 
+import * as report from './reporter.js';
 import Avo from './Avo.js';
 
 declare global {
@@ -1480,15 +1480,15 @@ function status(source: string, json, argv: any): void {
               }
               return pify(fs.readFile)(resultPath, 'utf8')
                 .then((data) => [resultPath, data])
-                .catch((error) => {
+                .catch(() => {
                   if (argv.verbose) {
-                    report.warn(`Failed to parse file: ${resultPath}`, error);
+                    report.warn(`Failed to parse file: ${resultPath}`);
                   }
                 });
             })
-            .catch((error) => {
+            .catch(() => {
               if (argv.verbose) {
-                report.warn(`Failed to read file stats: ${resultPath}`, error);
+                report.warn(`Failed to read file stats: ${resultPath}`);
               }
             }),
         ),
