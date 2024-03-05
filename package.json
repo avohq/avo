@@ -26,6 +26,7 @@
   },
   "files": [
     "cli.js",
+    "reporter.js",
     "Avo.js"
   ],
   "dependencies": {
@@ -51,8 +52,7 @@
     "uuid": "^9.0.0",
     "write": "^2.0.0",
     "write-json-file": "^5.0.0",
-    "yargs": "^17.2.1",
-    "yurnalist": "^2.1.0"
+    "yargs": "^17.2.1"
   },
   "devDependencies": {
     "@types/ignore-walk": "^4.0.0",
