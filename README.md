@@ -47,6 +47,6 @@ For more documentation, visit [https://www.avo.app/docs/implementation/cli](http
 
 **To create a release:**
 1. Verify that the changes in the _Unreleased_ section in CHANGELOG.md are accurate, create a new heading with the correct semantic version then move the content from the _Unreleased_ section there
-2. Udate the semantic version in `package.json` to match the one you just created in the changelog
+2. Update the semantic version in `package.json` to match the one you just created in the changelog
 3. Commit with the message `Release <version>` and push the changes
 4. Publish the package to npm (you'll need to be a maintainer of the avo project in npm): `npm publish`

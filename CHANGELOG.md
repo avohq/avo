@@ -1,5 +1,9 @@
 ## Unreleased
 
+## 3.2.11-alpha.0 (2024-03-06)
+
+Replace outdated yuralist reporter with a custom one
+
 ## 3.2.10 (2024-02-16)
 
 More info in the verbose logs
@@ -9,6 +13,7 @@ More info in the verbose logs
 Improve error messages
 
 ## 3.2.8 (2023-10-13)
+
 Update dependencies
 Wrap post-install script in try-catch to prevent unexpected errors during installation
 
