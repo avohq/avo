@@ -6,7 +6,7 @@
   "author": "Avo (https://www.avo.app)",
   "repository": {
     "type": "git",
-    "url": "https://github.com/avohq/avo.git"
+    "url": "git+https://github.com/avohq/avo.git"
   },
   "license": "MIT",
   "homepage": "https://github.com/avohq/avo",
