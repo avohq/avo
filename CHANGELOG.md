@@ -1,6 +1,6 @@
 ## Unreleased
 
-## 3.2.11-alpha.0 (2024-03-06)
+## 3.2.11 (2024-03-06)
 
 Replace outdated yuralist reporter with a custom one
 
