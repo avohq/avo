@@ -3,3 +3,4 @@ yarn-error.log
 cli.js
 Avo.js
 reporter.js
+reporter.test.js
