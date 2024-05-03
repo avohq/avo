@@ -8,5 +8,5 @@
     "strict": false,
     "skipLibCheck": true
   },
-  "files": ["cli.ts", "Avo.ts"]
+  "files": ["cli.ts", "Avo.ts", "reporter.ts", "reporter.test.ts"]
 }
