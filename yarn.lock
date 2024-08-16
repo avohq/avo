@@ -2493,9 +2493,9 @@ natural-compare@^1.4.0:
   integrity sha512-OWND8ei3VtNC9h7V60qff3SVobHr996CTwgxubgyQYEpg290h9J0buyECNNJexkFm5sOajh5G116RYA1c8ZMSw==
 
 node-avo-inspector@^1.0.1:
-  version "1.0.1"
-  resolved "https://registry.yarnpkg.com/node-avo-inspector/-/node-avo-inspector-1.0.1.tgz#7b2cea83e4de9c0ef7591b51c6c9678904b524bf"
-  integrity sha512-xwaoRXU9y5meKthFS9ZXju8Qg/TA1K2xI4cMSN56dgTLcTQtzq57huDrNqqMECUDasdE1qqEeAo3OWP3vUboCw==
+  version "1.1.0"
+  resolved "https://registry.yarnpkg.com/node-avo-inspector/-/node-avo-inspector-1.1.0.tgz#c092f0c6564ae28831301240a20a5e4cbe9719f7"
+  integrity sha512-+pM3FM82vw4k8jZX5VMR3hJbvLp0IwoguAXROtC2a4do71tPAqxPnPWm3UjhIETwt0h+Qg+SOkLchnc8b1dPPQ==
 
 normalize-url@^8.0.0:
   version "8.0.0"
