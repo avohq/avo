@@ -35,7 +35,7 @@
     "date-fns": "^2.28.0",
     "got": "^12.1.0",
     "http-shutdown": "^1.2.0",
-    "ignore-walk": "^5.0.1",
+    "ignore-walk": "^7.0.0",
     "inquirer": "^8.0.0",
     "inquirer-fuzzy-path": "^2.3.0",
     "jsonwebtoken": "^9.0.0",
