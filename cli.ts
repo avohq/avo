@@ -254,13 +254,17 @@ function _request(options) {
         return resolve(JSON.parse(response.body));
       })
       .catch((err) => {
-        report.error(`${responseToError(err.response, err)}\n`);
-        reject(
-          new AvoError(`Server Error. ${err.message}`, {
-            original: err,
-            exit: 2,
-          }),
-        );
+        let responseError = responseToError(err.response, err);
+        if (responseError != null) {
+          reject(responseError);
+        } else {
+          reject(
+            new AvoError(`Server Error. ${err.message}`, {
+              original: err,
+              exit: 2,
+            }),
+          );
+        }
       });
   });
 }
