@@ -254,7 +254,7 @@ function _request(options) {
         return resolve(JSON.parse(response.body));
       })
       .catch((err) => {
-        let responseError = responseToError(err.response, err);
+        const responseError = responseToError(err.response, err);
         if (responseError != null) {
           reject(responseError);
         } else {
