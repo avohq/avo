@@ -1315,7 +1315,7 @@ function pull(sourceFilter, json: AvoJson): Promise<void> {
     ? [json.sources.find((source) => matchesSource(source, sourceFilter))]
     : json.sources;
   const sourceNames = sources.map((source) => source.name);
-  wait(`Pulling ${sourceNames.join(', ')}`);
+  wait(`Pulling ${sourceNames.join(', ')}\n`);
 
   return getMasterStatus(json)
     .then((masterStatus) => {
