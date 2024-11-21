@@ -254,13 +254,17 @@ function _request(options) {
         return resolve(JSON.parse(response.body));
       })
       .catch((err) => {
-        report.error(`${responseToError(err.response, err)}\n`);
-        reject(
-          new AvoError(`Server Error. ${err.message}`, {
-            original: err,
-            exit: 2,
-          }),
-        );
+        const responseError = responseToError(err.response, err);
+        if (responseError != null) {
+          reject(responseError);
+        } else {
+          reject(
+            new AvoError(`Server Error. ${err.message}`, {
+              original: err,
+              exit: 2,
+            }),
+          );
+        }
       });
   });
 }
@@ -1311,7 +1315,7 @@ function pull(sourceFilter, json: AvoJson): Promise<void> {
     ? [json.sources.find((source) => matchesSource(source, sourceFilter))]
     : json.sources;
   const sourceNames = sources.map((source) => source.name);
-  wait(`Pulling ${sourceNames.join(', ')}`);
+  wait(`Pulling ${sourceNames.join(', ')}\n`);
 
   return getMasterStatus(json)
     .then((masterStatus) => {
