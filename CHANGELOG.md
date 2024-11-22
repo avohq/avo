@@ -1,5 +1,9 @@
 ## Unreleased
 
+## 3.2.13 (2024-11-21)
+
+Improve pull error mesages
+
 ## 3.2.11 (2024-03-06)
 
 Replace outdated yuralist reporter with a custom one
