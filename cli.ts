@@ -3,7 +3,8 @@ import ora from 'ora';
 import chalk from 'chalk';
 import { Minimatch } from 'minimatch';
 import dateFns from 'date-fns';
-import fs from 'fs';
+import fs from 'node:fs';
+import fsPromises from 'node:fs/promises';
 import http from 'http';
 import inquirer from 'inquirer';
 import jwt from 'jsonwebtoken';
@@ -11,7 +12,6 @@ import { loadJsonFile } from 'load-json-file';
 import logSymbols from 'log-symbols';
 import open from 'open';
 import path from 'path';
-import pify from 'pify';
 import portfinder from 'portfinder';
 import querystring from 'querystring';
 import got from 'got'; // eslint-disable-line import/no-unresolved
@@ -1016,7 +1016,8 @@ function loadAvoJsonOrInit({
   skipPullMaster,
   skipInit,
 }): Promise<AvoJson> {
-  return pify(fs.readFile)('avo.json', 'utf8')
+  return fsPromises
+    .readFile('avo.json', 'utf8')
     .then((avoFile) => {
       if (hasMergeConflicts(avoFile)) {
         return resolveAvoJsonConflicts(avoFile, {
@@ -1477,12 +1478,13 @@ function status(source: string, json, argv: any): void {
       results
         .filter((result) => !result.startsWith('.git'))
         .map((resultPath) =>
-          pify(fs.lstat)(resultPath)
+          fsPromises
+            .lstat(resultPath)
             .then((stats) => {
               if (stats.isSymbolicLink()) {
                 return [];
               }
-              return pify(fs.readFile)(resultPath, 'utf8')
+              return fsPromises.readFile(resultPath, 'utf8')
                 .then((data) => [resultPath, data])
                 .catch(() => {
                   if (argv.verbose) {
@@ -1503,7 +1505,7 @@ function status(source: string, json, argv: any): void {
     .then((cache) => {
       sources = Promise.all(
         sources.map((source) =>
-          pify(fs.readFile)(source.path, 'utf8').then((data) => {
+          fsPromises.readFile(source.path, 'utf8').then((data) => {
             const eventMap = getEventMap(data, argv.verbose);
             if (eventMap !== null) {
               const moduleMap = getModuleMap(data, argv.verbose);
@@ -2333,7 +2335,7 @@ yargs(hideBin(process.argv)) // eslint-disable-line no-unused-expressions
     aliases: ['resolve', 'conflicts'],
     desc: 'Resolve git conflicts in Avo files',
     handler: (argv) =>
-      pify(fs.readFile)('avo.json', 'utf8')
+      fsPromises.readFile('avo.json', 'utf8')
         .then((avoFile) => {
           if (hasMergeConflicts(avoFile)) {
             return requireAuth(argv, () =>
