@@ -1,5 +1,9 @@
 ## Unreleased
 
+## 3.2.14 (2025-02-17)
+
+Fix a bug where `avo status` would fail if some files in the target directory can not be read or parsed
+
 ## 3.2.13 (2024-11-21)
 
 Improve pull error mesages
