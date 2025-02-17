@@ -1480,7 +1480,7 @@ function status(source: string, json, argv: any): void {
           pify(fs.lstat)(resultPath)
             .then((stats) => {
               if (stats.isSymbolicLink()) {
-                return [];
+                return null;
               }
               return pify(fs.readFile)(resultPath, 'utf8')
                 .then((data) => [resultPath, data])
@@ -1488,15 +1488,20 @@ function status(source: string, json, argv: any): void {
                   if (argv.verbose) {
                     report.warn(`Failed to parse file: ${resultPath}`);
                   }
+                  return null;
                 });
             })
             .catch(() => {
               if (argv.verbose) {
                 report.warn(`Failed to read file stats: ${resultPath}`);
               }
+              return null;
             }),
         ),
-    ).then((cachePairs) => Object.fromEntries(cachePairs)),
+    ).then((cachePairs) =>
+      // Filter out null values and create object from valid pairs
+      Object.fromEntries(cachePairs.filter((pair) => pair != null)),
+    ),
   );
 
   fileCache
