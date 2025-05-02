@@ -2613,9 +2613,9 @@ pify@^6.0.0:
   integrity sha512-eDlMwqmYtd+rZMU6rCL05NT47Desr/jjfPkBPyqCg8PAyqbt+wxFLz1EQ5XvsfLFNlUEFmBj2FkNUvGF9BJLkQ==
 
 portfinder@^1.0.28:
-  version "1.0.36"
-  resolved "https://registry.yarnpkg.com/portfinder/-/portfinder-1.0.36.tgz#4eef523c15e972417a9ee496c3e9c95b8f649d52"
-  integrity sha512-gMKUzCoP+feA7t45moaSx7UniU7PgGN3hA8acAB+3Qn7/js0/lJ07fYZlxt9riE9S3myyxDCyAFzSrLlta0c9g==
+  version "1.0.37"
+  resolved "https://registry.yarnpkg.com/portfinder/-/portfinder-1.0.37.tgz#92b754ef89a11801c8efe4b0e5cd845b0064c212"
+  integrity sha512-yuGIEjDAYnnOex9ddMnKZEMFE0CcGo6zbfzDklkmT1m5z734ss6JMzN9rNB3+RR7iS+F10D4/BVIaXOyh8PQKw==
   dependencies:
     async "^3.2.6"
     debug "^4.3.6"
