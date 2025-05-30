@@ -52,7 +52,7 @@
     "uuid": "^9.0.0",
     "write": "^2.0.0",
     "write-json-file": "^5.0.0",
-    "yargs": "^17.2.1"
+    "yargs": "^18.0.0"
   },
   "devDependencies": {
     "@types/ignore-walk": "^4.0.0",
