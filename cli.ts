@@ -1077,6 +1077,53 @@ function codegen(
     return source;
   });
 
+  // Before writing files: detect file-per-event mode and store old event lists
+  const oldEventMaps: Map<string, { moduleName: string; events: string[] }> =
+    new Map();
+
+  for (const target of targets) {
+    const source = json.sources.find(({ id }) => id === target.id);
+    if (!source) continue;
+
+    try {
+      // Read existing main file to check for file-per-event mode
+      if (fs.existsSync(source.path)) {
+        const existingContent = fs.readFileSync(source.path, 'utf8');
+        const moduleMap = getModuleMap(existingContent, false);
+        if (moduleMap) {
+          // getModuleMap returns a string (the module name), not an array
+          // The type annotation is incorrect, but the actual value is a string
+          // Handle both string and array types for safety
+          const moduleName =
+            typeof moduleMap === 'string'
+              ? moduleMap
+              : Array.isArray(moduleMap) && moduleMap.length > 0
+                ? moduleMap[0]
+                : null;
+          if (moduleName && isFilePerEventMode(source.path, moduleName)) {
+            const oldEvents = getEventMap(existingContent, false);
+            if (oldEvents) {
+              oldEventMaps.set(source.id, {
+                moduleName,
+                events: oldEvents,
+              });
+            }
+          }
+        }
+      }
+    } catch (err) {
+      // If we can't read the file, skip cleanup for this source
+      if (err.code !== 'ENOENT') {
+        // Only log non-ENOENT errors
+        if (err instanceof Error) {
+          report.warn(
+            `Failed to read existing file for cleanup check: ${err.message}`,
+          );
+        }
+      }
+    }
+  }
+
   const sourceTasks = targets.map((target) =>
     Promise.all(target.code.map((code) => writeFile(code.path, code.content))),
   );
@@ -1084,6 +1131,33 @@ function codegen(
   const avoJsonTask = writeAvoJson(newJson);
 
   Promise.all([avoJsonTask].concat(sourceTasks)).then(() => {
+    // After writing files: cleanup obsolete event files
+    for (const target of targets) {
+      const source = newJson.sources.find(({ id }) => id === target.id);
+      if (!source) continue;
+
+      const oldEventMap = oldEventMaps.get(source.id);
+      if (!oldEventMap) continue; // Not in file-per-event mode
+
+      // Find the main file in target.code that matches source.path
+      const mainFile = target.code.find((code) => code.path === source.path);
+      if (!mainFile) continue;
+
+      // Parse AVOEVENTMAP from the newly written main file
+      const newEvents = getEventMap(mainFile.content, false);
+      if (newEvents) {
+        const eventsDir = getEventsDirectoryPath(
+          source.path,
+          oldEventMap.moduleName,
+        );
+        cleanupObsoleteEventFiles(
+          eventsDir,
+          oldEventMap.events,
+          newEvents,
+        );
+      }
+    }
+
     if (errors !== undefined && errors !== null && errors !== '') {
       report.warn(`${errors}\n`);
     }
@@ -1433,6 +1507,41 @@ function getModuleMap(data: string, verbose: boolean): string[] | null {
     report.error('No module map found');
   }
   return null;
+}
+
+// Get events directory path from source path and module name
+// e.g., source.path="./Avo.ts", moduleName="Avo" -> "./AvoEvents"
+export function getEventsDirectoryPath(sourcePath: string, moduleName: string): string {
+  const parsed = path.parse(sourcePath);
+  return path.join(parsed.dir, `${moduleName}Events`);
+}
+
+// Check if file-per-event mode is active by checking for events directory
+export function isFilePerEventMode(sourcePath: string, moduleName: string): boolean {
+  const eventsDir = getEventsDirectoryPath(sourcePath, moduleName);
+  return fs.existsSync(eventsDir) && fs.statSync(eventsDir).isDirectory();
+}
+
+// Convert event name to file name (camelCase convention from codegen)
+export function eventNameToFileName(eventName: string): string {
+  const camelCase = eventName.charAt(0).toLowerCase() + eventName.slice(1);
+  return `${camelCase}.ts`;
+}
+
+// Cleanup obsolete event files
+export function cleanupObsoleteEventFiles(
+  eventsDir: string,
+  oldEvents: string[],
+  newEvents: string[],
+): void {
+  const removedEvents = oldEvents.filter((e) => !newEvents.includes(e));
+  for (const eventName of removedEvents) {
+    const filePath = path.join(eventsDir, eventNameToFileName(eventName));
+    if (fs.existsSync(filePath)) {
+      fs.unlinkSync(filePath);
+      report.info(`Removed obsolete event file: ${filePath}`);
+    }
+  }
 }
 
 function getSource(argv, json: AvoJson): Promise<[string, AvoJson]> {
