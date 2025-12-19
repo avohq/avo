@@ -1150,10 +1150,13 @@ function codegen(
           source.path,
           oldEventMap.moduleName,
         );
+        // Extract file extension from source path (e.g., .ts, .kt, .swift)
+        const sourceExtension = path.extname(source.path);
         cleanupObsoleteEventFiles(
           eventsDir,
           oldEventMap.events,
           newEvents,
+          sourceExtension,
         );
       }
     }
@@ -1523,9 +1526,9 @@ export function isFilePerEventMode(sourcePath: string, moduleName: string): bool
 }
 
 // Convert event name to file name (camelCase convention from codegen)
-export function eventNameToFileName(eventName: string): string {
+export function eventNameToFileName(eventName: string, extension: string): string {
   const camelCase = eventName.charAt(0).toLowerCase() + eventName.slice(1);
-  return `${camelCase}.ts`;
+  return `${camelCase}${extension}`;
 }
 
 // Cleanup obsolete event files
@@ -1533,10 +1536,11 @@ export function cleanupObsoleteEventFiles(
   eventsDir: string,
   oldEvents: string[],
   newEvents: string[],
+  extension: string,
 ): void {
   const removedEvents = oldEvents.filter((e) => !newEvents.includes(e));
   for (const eventName of removedEvents) {
-    const filePath = path.join(eventsDir, eventNameToFileName(eventName));
+    const filePath = path.join(eventsDir, eventNameToFileName(eventName, extension));
     if (fs.existsSync(filePath)) {
       fs.unlinkSync(filePath);
       report.info(`Removed obsolete event file: ${filePath}`);
@@ -1967,7 +1971,20 @@ function parseForceFeaturesParam(forceFeatures: string | undefined): string[] {
   return forceFeatures?.split(',').map((it) => it.trim());
 }
 
-yargs(hideBin(process.argv)) // eslint-disable-line no-unused-expressions
+// Only execute yargs CLI if this file is run directly (not imported for testing)
+// Skip execution if we're in a test environment
+// Check multiple indicators that we're running under Jest
+const isMainModule =
+  !process.env.AVO_TEST_MODE &&
+  !process.env.JEST_WORKER_ID &&
+  typeof jest === 'undefined' &&
+  !process.argv.some((arg) => arg.includes('jest')) &&
+  !process.argv.some((arg) => arg.includes('jest.js')) &&
+  process.argv[1]?.endsWith('cli.js');
+
+if (isMainModule) {
+  try {
+    yargs(hideBin(process.argv)) // eslint-disable-line no-unused-expressions
   .usage('$0 command')
   .scriptName('avo')
   .version(pkg.version)
@@ -2712,26 +2729,36 @@ yargs(hideBin(process.argv)) // eslint-disable-line no-unused-expressions
     },
   })
 
-  .demandCommand(1, 'must provide a valid command')
-  .recommendCommands()
-  .help().argv;
-
-/// ///////////////// ////////
-// catch unhandled promises
-
-process.on('unhandledRejection', (err) => {
-  cancelWait();
-
-  if (!(err instanceof Error) && !(err instanceof AvoError)) {
-    report.error(
-      new AvoError(`Promise rejected with value: ${util.inspect(err)}`),
-    );
-  } else {
-    // @ts-ignore
-    report.error(err.message);
+      .demandCommand(1, 'must provide a valid command')
+      .recommendCommands()
+      .help().argv;
+  } catch (err) {
+    // Silently ignore yargs errors when imported (e.g., in tests)
+    // Only exit if we're actually running as the main module
+    if (isMainModule) {
+      throw err;
+    }
   }
-  // @ts-ignore
-  // console.error(err.stack);
 
-  process.exit(1);
-});
+  /// ///////////////// ////////
+  // catch unhandled promises
+
+  if (isMainModule) {
+    process.on('unhandledRejection', (err) => {
+      cancelWait();
+
+      if (!(err instanceof Error) && !(err instanceof AvoError)) {
+        report.error(
+          new AvoError(`Promise rejected with value: ${util.inspect(err)}`),
+        );
+      } else {
+        // @ts-ignore
+        report.error(err.message);
+      }
+      // @ts-ignore
+      // console.error(err.stack);
+
+      process.exit(1);
+    });
+  }
+}
