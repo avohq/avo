@@ -1996,7 +1996,7 @@ if (isMainModule) {
   })
   .command({
     command: 'track-install',
-    desc: false,
+    describe: false,
     handler: async (argv) => {
       try {
         Avo.cliInstalled({
@@ -2014,7 +2014,7 @@ if (isMainModule) {
   })
   .command({
     command: 'init',
-    desc: 'Initialize an Avo workspace in the current folder',
+    describe: 'Initialize an Avo workspace in the current folder',
     handler: (argv) => {
       loadAvoJsonOrInit({ argv, skipPullMaster: false, skipInit: true })
         .then((json) => {
@@ -2049,7 +2049,7 @@ if (isMainModule) {
             force: undefined,
             forceFeatures: undefined,
           });
-          return requireAuth(argv, () =>
+          return requireAuth(argv as any, () =>
             init()
               .then(writeAvoJson)
               .then(() => {
@@ -2076,7 +2076,7 @@ if (isMainModule) {
   })
   .command({
     command: 'pull [source]',
-    desc: 'Pull analytics wrappers from Avo workspace',
+    describe: 'Pull analytics wrappers from Avo workspace',
     builder: (yargs) =>
       yargs
         .option('branch', {
@@ -2110,7 +2110,7 @@ if (isMainModule) {
             force: argv.f === true,
             forceFeatures: parseForceFeaturesParam(argv.forceFeatures),
           });
-          requireAuth(argv, () => {
+          requireAuth(argv as any, () => {
             if (argv.branch && json.branch.name !== argv.branch) {
               return checkout(argv.branch, json)
                 .then((data) => getSource(argv, data))
@@ -2141,7 +2141,7 @@ if (isMainModule) {
   .command({
     command: 'checkout [branch]',
     aliases: ['branch'],
-    desc: 'Switch branches',
+    describe: 'Switch branches',
     handler: (argv) =>
       loadAvoJsonOrInit({ argv, skipInit: false, skipPullMaster: false })
         .then((json) => {
@@ -2157,7 +2157,7 @@ if (isMainModule) {
             forceFeatures: undefined,
           });
           report.info(`Currently on branch '${json.branch.name}'`);
-          requireAuth(argv, () =>
+          requireAuth(argv as any, () =>
             checkout(argv.branch, json).then(writeAvoJson),
           );
         })
@@ -2178,12 +2178,12 @@ if (isMainModule) {
   })
   .command({
     command: 'source <command>',
-    desc: 'Manage sources for the current project',
+    describe: 'Manage sources for the current project',
     builder: (yargs) => {
-      yargs
+      return yargs
         .command({
           command: '$0',
-          desc: 'List sources in this project',
+          describe: 'List sources in this project',
           handler: (argv) => {
             loadAvoJsonOrInit({ argv, skipInit: false, skipPullMaster: false })
               .then((json) => {
@@ -2235,7 +2235,7 @@ if (isMainModule) {
         })
         .command({
           command: 'add [source]',
-          desc: 'Add a source to this project',
+          describe: 'Add a source to this project',
           handler: (argv) => {
             loadAvoJsonOrInit({ argv, skipInit: false, skipPullMaster: false })
               .then((json) => {
@@ -2251,7 +2251,7 @@ if (isMainModule) {
                   forceFeatures: undefined,
                 });
 
-                requireAuth(argv, () => {
+                requireAuth(argv as any, () => {
                   selectSource(argv.source, json).then(writeAvoJson);
                 });
               })
@@ -2274,7 +2274,7 @@ if (isMainModule) {
         .command({
           command: 'remove [source]',
           aliases: ['rm'],
-          desc: 'Remove a source from this project',
+          describe: 'Remove a source from this project',
           handler: (argv) => {
             loadAvoJsonOrInit({ argv, skipInit: false, skipPullMaster: false })
               .then((json) => {
@@ -2377,10 +2377,13 @@ if (isMainModule) {
           },
         });
     },
+    handler: () => {
+      // Parent command - subcommands handle the actual logic
+    },
   })
   .command({
     command: 'status [source]',
-    desc: 'Show the status of the Avo implementation',
+    describe: 'Show the status of the Avo implementation',
     handler: (argv) => {
       loadAvoJsonOrInit({ argv, skipInit: false, skipPullMaster: false })
         .then((json) => {
@@ -2418,7 +2421,7 @@ if (isMainModule) {
   .command({
     command: 'merge main',
     aliases: ['merge master'],
-    desc: 'Pull the Avo main branch into your current branch',
+    describe: 'Pull the Avo main branch into your current branch',
     builder: (yargs) =>
       yargs.option('f', {
         alias: 'force',
@@ -2441,7 +2444,7 @@ if (isMainModule) {
             forceFeatures: undefined,
           });
 
-          return requireAuth(argv, () => pullMaster(json).then(writeAvoJson));
+          return requireAuth(argv as any, () => pullMaster(json).then(writeAvoJson));
         })
         .catch((error) => {
           Avo.cliInvoked({
@@ -2462,12 +2465,12 @@ if (isMainModule) {
   .command({
     command: 'conflict',
     aliases: ['resolve', 'conflicts'],
-    desc: 'Resolve git conflicts in Avo files',
+    describe: 'Resolve git conflicts in Avo files',
     handler: (argv) =>
       pify(fs.readFile)('avo.json', 'utf8')
         .then((avoFile) => {
           if (hasMergeConflicts(avoFile)) {
-            return requireAuth(argv, () =>
+            return requireAuth(argv as any, () =>
               resolveAvoJsonConflicts(avoFile, {
                 argv,
                 skipPullMaster: false,
@@ -2521,7 +2524,7 @@ if (isMainModule) {
   })
   .command({
     command: 'edit',
-    desc: 'Open the Avo workspace in your browser',
+    describe: 'Open the Avo workspace in your browser',
     handler: (argv) => {
       loadAvoJsonOrInit({ argv, skipInit: false, skipPullMaster: false })
         .then((json) => {
@@ -2562,7 +2565,7 @@ if (isMainModule) {
   })
   .command({
     command: 'login',
-    desc: 'Log into the Avo platform',
+    describe: 'Log into the Avo platform',
     handler: () => {
       const command = () => {
         const user = conf.get('user');
@@ -2625,7 +2628,7 @@ if (isMainModule) {
   })
   .command({
     command: 'logout',
-    desc: 'Log out from the Avo platform',
+    describe: 'Log out from the Avo platform',
     handler: () => {
       const command = () => {
         const user = conf.get('user');
@@ -2684,10 +2687,10 @@ if (isMainModule) {
   })
   .command({
     command: 'whoami',
-    desc: 'Shows the currently logged in username',
+    describe: 'Shows the currently logged in username',
     handler: (argv) => {
       const command = () => {
-        requireAuth(argv, () => {
+        requireAuth(argv as any, () => {
           if (conf.has('user')) {
             const user = conf.get('user');
             report.info(`Logged in as ${email(user.email)}`);

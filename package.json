@@ -18,7 +18,7 @@
   },
   "scripts": {
     "postinstall": "node cli.js track-install",
-    "prepublishOnly": "npm run compile",
+    "prepublishOnly": "npm run build",
     "lint": "eslint cli.ts",
     "format": "prettier --write cli.ts",
     "check-format": "prettier --check cli.ts",
