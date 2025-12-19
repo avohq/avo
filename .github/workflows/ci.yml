@@ -18,7 +18,7 @@ jobs:
       - name: Install modules
         run: yarn install --frozen-lockfile --ignore-scripts
       - name: Build TypeScript
-        run: yarn compile
+        run: yarn build
       - name: Check linting
         run: yarn lint
       - name: Check formatting
