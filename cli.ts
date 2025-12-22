@@ -1746,7 +1746,10 @@ function status(source: string, json, argv: any): void {
               }
 
               // Check if file-per-event mode is active
-              const isFilePerEvent = isFilePerEventMode(source.path, moduleName);
+              const isFilePerEvent = isFilePerEventMode(
+                source.path,
+                moduleName,
+              );
 
               return Promise.all(
                 eventMap.map((eventName) => {
