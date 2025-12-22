@@ -1758,8 +1758,8 @@ function status(source: string, json, argv: any): void {
                   let pattern: string;
                   if (isFilePerEvent) {
                     // File-per-event mode: support both with and without module prefix
-                    // Pattern matches: Module.eventName, [Module eventName], eventName, [eventName]
-                    pattern = `(${moduleName}\\.${eventName}|\\[${moduleName} ${eventName}|${eventName}|\\[${eventName})`;
+                    // Pattern matches: Module.eventName, [Module eventName, eventName(, [eventName
+                    pattern = `(${moduleName}\\.${eventName}|\\[${moduleName} ${eventName}|${eventName}\\(|\\[${eventName})`;
                   } else {
                     // Legacy mode: only match with module prefix
                     pattern = `(${moduleName}\\.${eventName}|\\[${moduleName} ${eventName})`;
