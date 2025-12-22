@@ -1,5 +1,10 @@
 ## Unreleased
 
+## 3.3.0 (2025-12-22)
+
+Add support for `avo status` command in file-per-event mode
+Add cleanup mechanism for obsolete event files in file-per-event mode
+
 ## 3.2.14 (2025-02-17)
 
 Fix a bug where `avo status` would fail if some files in the target directory can not be read or parsed
