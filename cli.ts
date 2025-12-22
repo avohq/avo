@@ -1745,11 +1745,23 @@ function status(source: string, json, argv: any): void {
                 report.info(`Looking in files: ${combinedPaths.join('\n')}`);
               }
 
+              // Check if file-per-event mode is active
+              const isFilePerEvent = isFilePerEventMode(source.path, moduleName);
+
               return Promise.all(
                 eventMap.map((eventName) => {
-                  const re = new RegExp(
-                    `(${moduleName}\\.${eventName}|\\[${moduleName} ${eventName})`,
-                  );
+                  // Build regex pattern based on mode
+                  // In file-per-event mode, events can be called without module prefix
+                  let pattern: string;
+                  if (isFilePerEvent) {
+                    // File-per-event mode: support both with and without module prefix
+                    // Pattern matches: Module.eventName, [Module eventName], eventName, [eventName]
+                    pattern = `(${moduleName}\\.${eventName}|\\[${moduleName} ${eventName}|${eventName}|\\[${eventName})`;
+                  } else {
+                    // Legacy mode: only match with module prefix
+                    pattern = `(${moduleName}\\.${eventName}|\\[${moduleName} ${eventName})`;
+                  }
+                  const re = new RegExp(pattern);
                   const results = Object.entries(lookup)
                     .map(([path, data]) => {
                       const results = findMatches(data, re);
