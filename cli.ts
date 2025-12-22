@@ -1596,22 +1596,15 @@ export function cleanupObsoleteEventFiles(
       eventsDir,
       eventNameToFileName(eventName, extension),
     );
-    try {
-      if (fs.existsSync(filePath)) {
-        try {
-          fs.unlinkSync(filePath);
-          report.info(`Removed obsolete event file: ${filePath}`);
-        } catch (error) {
-          report.error(
-            `Failed to remove obsolete event file: ${filePath} - ${error instanceof Error ? error.message : String(error)}`,
-          );
-        }
+    if (fs.existsSync(filePath)) {
+      try {
+        fs.unlinkSync(filePath);
+        report.info(`Removed obsolete event file: ${filePath}`);
+      } catch (error) {
+        report.error(
+          `Failed to remove obsolete event file: ${filePath} - ${error instanceof Error ? error.message : String(error)}`,
+        );
       }
-    } catch (error) {
-      // Handle errors from existsSync (shouldn't happen, but be defensive)
-      report.warn(
-        `Error checking existence of file ${filePath}: ${error instanceof Error ? error.message : String(error)}`,
-      );
     }
   });
 }
