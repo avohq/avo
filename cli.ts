@@ -1055,10 +1055,10 @@ function writeAvoJson(json: AvoJson): Promise<AvoJson> {
 }
 
 // Helper function to map targets to sources and filter out nulls
-function mapTargetsToSources<T extends { id: string }, S extends { id: string }>(
-  targets: T[],
-  sources: S[],
-): Array<{ target: T; source: S }> {
+function mapTargetsToSources<
+  T extends { id: string },
+  S extends { id: string },
+>(targets: T[], sources: S[]): Array<{ target: T; source: S }> {
   return targets
     .map((target) => {
       const source = sources.find(({ id }) => id === target.id);
@@ -1102,45 +1102,45 @@ function codegen(
     new Map();
 
   mapTargetsToSources(targets, json.sources).forEach(({ source }) => {
-      try {
-        // Read existing main file to check for file-per-event mode
-        if (fs.existsSync(source.path)) {
-          const existingContent = fs.readFileSync(source.path, 'utf8');
+    try {
+      // Read existing main file to check for file-per-event mode
+      if (fs.existsSync(source.path)) {
+        const existingContent = fs.readFileSync(source.path, 'utf8');
+        // eslint-disable-next-line no-use-before-define
+        const moduleMap = getModuleMap(existingContent, false);
+        if (moduleMap) {
+          // getModuleMap returns a string (the module name), not an array
+          // The type annotation is incorrect, but the actual value is a string
+          // Handle both string and array types for safety
+          let moduleName: string | null = null;
+          if (typeof moduleMap === 'string') {
+            moduleName = moduleMap;
+          } else if (Array.isArray(moduleMap) && moduleMap.length > 0) {
+            [moduleName] = moduleMap;
+          }
           // eslint-disable-next-line no-use-before-define
-          const moduleMap = getModuleMap(existingContent, false);
-          if (moduleMap) {
-            // getModuleMap returns a string (the module name), not an array
-            // The type annotation is incorrect, but the actual value is a string
-            // Handle both string and array types for safety
-            let moduleName: string | null = null;
-            if (typeof moduleMap === 'string') {
-              moduleName = moduleMap;
-            } else if (Array.isArray(moduleMap) && moduleMap.length > 0) {
-              [moduleName] = moduleMap;
-            }
+          if (moduleName && isFilePerEventMode(source.path, moduleName)) {
             // eslint-disable-next-line no-use-before-define
-            if (moduleName && isFilePerEventMode(source.path, moduleName)) {
-              // eslint-disable-next-line no-use-before-define
-              const oldEvents = getEventMap(existingContent, false);
-              if (oldEvents) {
-                oldEventMaps.set(source.id, {
-                  moduleName,
-                  events: oldEvents,
-                });
-              }
+            const oldEvents = getEventMap(existingContent, false);
+            if (oldEvents) {
+              oldEventMaps.set(source.id, {
+                moduleName,
+                events: oldEvents,
+              });
             }
           }
         }
-      } catch (err) {
-        // If we can't read the file, skip cleanup for this source
-        if (err instanceof Error && 'code' in err && err.code !== 'ENOENT') {
-          // Only log non-ENOENT errors
-          report.warn(
-            `Failed to read existing file for cleanup check: ${err.message}`,
-          );
-        }
       }
-    });
+    } catch (err) {
+      // If we can't read the file, skip cleanup for this source
+      if (err instanceof Error && 'code' in err && err.code !== 'ENOENT') {
+        // Only log non-ENOENT errors
+        report.warn(
+          `Failed to read existing file for cleanup check: ${err.message}`,
+        );
+      }
+    }
+  });
 
   const sourceTasks = targets.map((target) =>
     Promise.all(target.code.map((code) => writeFile(code.path, code.content))),
