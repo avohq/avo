@@ -1054,6 +1054,26 @@ function writeAvoJson(json: AvoJson): Promise<AvoJson> {
   }).then(() => json);
 }
 
+// Helper function to map targets to sources and filter out nulls
+function mapTargetsToSources<T extends { id: string }, S extends { id: string }>(
+  targets: T[],
+  sources: S[],
+): Array<{ target: T; source: S }> {
+  return targets
+    .map((target) => {
+      const source = sources.find(({ id }) => id === target.id);
+      return source ? { target, source } : null;
+    })
+    .filter(
+      (
+        item,
+      ): item is {
+        target: T;
+        source: S;
+      } => item !== null,
+    );
+}
+
 function codegen(
   json: AvoJson,
   { schema, sources: targets, warnings, success, errors },
@@ -1081,20 +1101,7 @@ function codegen(
   const oldEventMaps: Map<string, { moduleName: string; events: string[] }> =
     new Map();
 
-  targets
-    .map((target) => {
-      const source = json.sources.find(({ id }) => id === target.id);
-      return source ? { target, source } : null;
-    })
-    .filter(
-      (
-        item,
-      ): item is {
-        target: (typeof targets)[0];
-        source: (typeof json.sources)[0];
-      } => item !== null,
-    )
-    .forEach(({ source }) => {
+  mapTargetsToSources(targets, json.sources).forEach(({ source }) => {
       try {
         // Read existing main file to check for file-per-event mode
         if (fs.existsSync(source.path)) {
@@ -1143,19 +1150,7 @@ function codegen(
 
   return Promise.all([avoJsonTask].concat(sourceTasks)).then(() => {
     // After writing files: cleanup obsolete event files
-    targets
-      .map((target) => {
-        const source = newJson.sources.find(({ id }) => id === target.id);
-        return source ? { target, source } : null;
-      })
-      .filter(
-        (
-          item,
-        ): item is {
-          target: (typeof targets)[0];
-          source: (typeof newJson.sources)[0];
-        } => item !== null,
-      )
+    mapTargetsToSources(targets, newJson.sources)
       .map(({ target, source }) => {
         const oldEventMap = oldEventMaps.get(source.id);
         return oldEventMap ? { target, source, oldEventMap } : null;
@@ -1562,7 +1557,21 @@ export function isFilePerEventMode(
   moduleName: string,
 ): boolean {
   const eventsDir = getEventsDirectoryPath(sourcePath, moduleName);
-  return fs.existsSync(eventsDir) && fs.statSync(eventsDir).isDirectory();
+  try {
+    if (!fs.existsSync(eventsDir)) {
+      return false;
+    }
+    return fs.statSync(eventsDir).isDirectory();
+  } catch (error) {
+    // Treat any error (permission, transient FS errors, etc.) as "not a directory"
+    // Log the error for debugging purposes
+    if (error instanceof Error) {
+      report.warn(
+        `Error checking file-per-event mode for ${eventsDir}: ${error.message}`,
+      );
+    }
+    return false;
+  }
 }
 
 // Convert event name to file name (camelCase convention from codegen)
@@ -1587,15 +1596,22 @@ export function cleanupObsoleteEventFiles(
       eventsDir,
       eventNameToFileName(eventName, extension),
     );
-    if (fs.existsSync(filePath)) {
-      try {
-        fs.unlinkSync(filePath);
-        report.info(`Removed obsolete event file: ${filePath}`);
-      } catch (error) {
-        report.error(
-          `Failed to remove obsolete event file: ${filePath} - ${error instanceof Error ? error.message : String(error)}`,
-        );
+    try {
+      if (fs.existsSync(filePath)) {
+        try {
+          fs.unlinkSync(filePath);
+          report.info(`Removed obsolete event file: ${filePath}`);
+        } catch (error) {
+          report.error(
+            `Failed to remove obsolete event file: ${filePath} - ${error instanceof Error ? error.message : String(error)}`,
+          );
+        }
       }
+    } catch (error) {
+      // Handle errors from existsSync (shouldn't happen, but be defensive)
+      report.warn(
+        `Error checking existence of file ${filePath}: ${error instanceof Error ? error.message : String(error)}`,
+      );
     }
   });
 }
