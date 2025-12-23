@@ -1726,6 +1726,7 @@ function status(source: string, json, argv: any): void {
                 );
               }
 
+              const eventsDir = getEventsDirectoryPath(source.path, moduleName);
               const globs: Minimatch[] = [
                 new Minimatch(
                   source.analysis?.glob ??
@@ -1733,6 +1734,7 @@ function status(source: string, json, argv: any): void {
                   {},
                 ),
                 new Minimatch(`!${source.path}`, {}),
+                new Minimatch(`!${eventsDir}/**`, {}),
               ];
 
               const lookup: { [key: string]: string } = {};
@@ -2050,13 +2052,20 @@ function parseForceFeaturesParam(forceFeatures: string | undefined): string[] {
 // Only execute yargs CLI if this file is run directly (not imported for testing)
 // Skip execution if we're in a test environment
 // Check multiple indicators that we're running under Jest
+// When run via npm/yarn binary, process.argv[1] may point to a wrapper, so we check
+// if cli.js is in the path or if we're not in a test environment
+const isTestEnvironment =
+  process.env.AVO_TEST_MODE ||
+  process.env.JEST_WORKER_ID ||
+  typeof jest !== 'undefined' ||
+  process.argv.some((arg) => arg.includes('jest')) ||
+  process.argv.some((arg) => arg.includes('jest.js'));
+
 const isMainModule =
-  !process.env.AVO_TEST_MODE &&
-  !process.env.JEST_WORKER_ID &&
-  typeof jest === 'undefined' &&
-  !process.argv.some((arg) => arg.includes('jest')) &&
-  !process.argv.some((arg) => arg.includes('jest.js')) &&
-  process.argv[1]?.endsWith('cli.js');
+  !isTestEnvironment &&
+  (process.argv[1]?.includes('cli.js') ||
+    process.argv[1]?.includes('/avo') ||
+    process.argv[1]?.endsWith('avo'));
 
 if (isMainModule) {
   try {
