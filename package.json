@@ -72,6 +72,7 @@
     "typescript": "^5.0.2"
   },
   "resolutions": {
-    "type-fest": "^3.13.1"
+    "type-fest": "^3.13.1",
+    "brace-expansion": "^2.0.2"
   }
 }
