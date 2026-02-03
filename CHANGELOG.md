@@ -1,5 +1,9 @@
 ## Unreleased
 
+## 3.3.1 (2026-02-03)
+
+Update dependencies
+
 ## 3.3.0 (2025-12-22)
 
 Add support for `avo status` command in file-per-event mode
