@@ -1949,7 +1949,24 @@ function _loginWithoutLocalhost() {
 
   report.info(`Visit this URL on any device to login: ${new URL(authUrl)}`);
 
-  return open(authUrl);
+  open(authUrl);
+
+  return inquirer
+    .prompt([
+      {
+        type: 'input',
+        name: 'code',
+        message: 'Paste the authorization code here:',
+      },
+    ])
+    .then((answers) => {
+      return _getTokensFromAuthorizationCode(answers.code.trim(), callbackUrl).then(
+        (tokens) => ({
+          user: jwt.decode(tokens.idToken),
+          tokens,
+        }),
+      );
+    });
 }
 
 type FirebaseSignInProvider = 'custom' | 'google.com' | 'password';
@@ -2029,7 +2046,10 @@ function _loginWithLocalhost(port: number) {
   });
 }
 
-function login() {
+function login(forceManual = false) {
+  if (forceManual) {
+    return _loginWithoutLocalhost();
+  }
   return _getPort().then(_loginWithLocalhost, _loginWithoutLocalhost);
 }
 
@@ -2669,14 +2689,21 @@ if (isMainModule) {
       .command({
         command: 'login',
         describe: 'Log into the Avo platform',
-        handler: () => {
+        builder: (yargs) =>
+          yargs.option('force-manual', {
+            alias: 'm',
+            describe: 'Force manual login (copy-paste code)',
+            type: 'boolean',
+            default: false,
+          }),
+        handler: (argv) => {
           const command = () => {
             const user = conf.get('user');
             if (user) {
               report.info(`Already logged in as ${email(user.email)}`);
               return;
             }
-            login()
+            login(argv.forceManual)
               .then((result: LoginResult) => {
                 conf.set('user', result.user);
                 conf.set('tokens', result.tokens);
