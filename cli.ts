@@ -1943,6 +1943,30 @@ function _respondWithRedirect(
   });
 }
 
+function _extractAuthorizationCode(codeOrUrl: string): string {
+  const input = codeOrUrl.trim();
+
+  if (!input) {
+    return input;
+  }
+
+  try {
+    const parsedUrl = new URL(input);
+    const code = parsedUrl.searchParams.get('code');
+    if (code) {
+      return code.trim();
+    }
+  } catch {
+    // Not a full URL, fall back to parsing possible query-like input.
+  }
+
+  const query = input.includes('?')
+    ? input.split('?').slice(1).join('?')
+    : input;
+  const code = new URLSearchParams(query).get('code');
+  return code ? code.trim() : input;
+}
+
 function _loginWithoutLocalhost() {
   const callbackUrl = _getCallbackUrl();
   const authUrl = _getLoginUrl(callbackUrl);
@@ -1955,17 +1979,19 @@ function _loginWithoutLocalhost() {
     .prompt([
       {
         type: 'input',
-        name: 'code',
-        message: 'Paste the authorization code here:',
+        name: 'codeOrUrl',
+        message: 'Paste full redirect URL or code (value after code=):',
       },
     ])
     .then((answers) => {
-      return _getTokensFromAuthorizationCode(answers.code.trim(), callbackUrl).then(
-        (tokens) => ({
-          user: jwt.decode(tokens.idToken),
-          tokens,
-        }),
-      );
+      const authorizationCode = _extractAuthorizationCode(answers.codeOrUrl);
+      return _getTokensFromAuthorizationCode(
+        authorizationCode,
+        callbackUrl,
+      ).then((tokens) => ({
+        user: jwt.decode(tokens.idToken),
+        tokens,
+      }));
     });
 }
 
