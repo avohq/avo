@@ -1983,16 +1983,15 @@ function _loginWithoutLocalhost() {
         message: 'Paste full redirect URL or code (value after code=):',
       },
     ])
-    .then((answers) => {
-      const authorizationCode = _extractAuthorizationCode(answers.codeOrUrl);
-      return _getTokensFromAuthorizationCode(
-        authorizationCode,
+    .then((answers) =>
+      _getTokensFromAuthorizationCode(
+        _extractAuthorizationCode(answers.codeOrUrl),
         callbackUrl,
       ).then((tokens) => ({
         user: jwt.decode(tokens.idToken),
         tokens,
-      }));
-    });
+      })),
+    );
 }
 
 type FirebaseSignInProvider = 'custom' | 'google.com' | 'password';
