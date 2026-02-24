@@ -4,7 +4,6 @@
 
 Add manual login option (`avo login --force-manual` / `-m`) for environments where the local OAuth redirect doesn't work
 Support pasting the full redirect URL during manual login
-Pin inquirer to 8.2.6 for Node 16 compatibility
 
 ## 3.3.1 (2026-02-03)
 
