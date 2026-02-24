@@ -1943,13 +1943,55 @@ function _respondWithRedirect(
   });
 }
 
+function _extractAuthorizationCode(codeOrUrl: string): string {
+  const input = codeOrUrl.trim();
+
+  if (!input) {
+    return input;
+  }
+
+  try {
+    const parsedUrl = new URL(input);
+    const code = parsedUrl.searchParams.get('code');
+    if (code) {
+      return code.trim();
+    }
+  } catch {
+    // Not a full URL, fall back to parsing possible query-like input.
+  }
+
+  const query = input.includes('?')
+    ? input.split('?').slice(1).join('?')
+    : input;
+  const code = new URLSearchParams(query).get('code');
+  return code ? code.trim() : input;
+}
+
 function _loginWithoutLocalhost() {
   const callbackUrl = _getCallbackUrl();
   const authUrl = _getLoginUrl(callbackUrl);
 
   report.info(`Visit this URL on any device to login: ${new URL(authUrl)}`);
 
-  return open(authUrl);
+  open(authUrl);
+
+  return inquirer
+    .prompt([
+      {
+        type: 'input',
+        name: 'codeOrUrl',
+        message: 'Paste full redirect URL or code (value after code=):',
+      },
+    ])
+    .then((answers) =>
+      _getTokensFromAuthorizationCode(
+        _extractAuthorizationCode(answers.codeOrUrl),
+        callbackUrl,
+      ).then((tokens) => ({
+        user: jwt.decode(tokens.idToken),
+        tokens,
+      })),
+    );
 }
 
 type FirebaseSignInProvider = 'custom' | 'google.com' | 'password';
@@ -2029,7 +2071,10 @@ function _loginWithLocalhost(port: number) {
   });
 }
 
-function login() {
+function login(forceManual = false) {
+  if (forceManual) {
+    return _loginWithoutLocalhost();
+  }
   return _getPort().then(_loginWithLocalhost, _loginWithoutLocalhost);
 }
 
@@ -2669,14 +2714,21 @@ if (isMainModule) {
       .command({
         command: 'login',
         describe: 'Log into the Avo platform',
-        handler: () => {
+        builder: (yargs) =>
+          yargs.option('force-manual', {
+            alias: 'm',
+            describe: 'Force manual login (copy-paste code)',
+            type: 'boolean',
+            default: false,
+          }),
+        handler: (argv) => {
           const command = () => {
             const user = conf.get('user');
             if (user) {
               report.info(`Already logged in as ${email(user.email)}`);
               return;
             }
-            login()
+            login(argv.forceManual)
               .then((result: LoginResult) => {
                 conf.set('user', result.user);
                 conf.set('tokens', result.tokens);
