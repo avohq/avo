@@ -1,5 +1,10 @@
 ## Unreleased
 
+## 3.4.0 (2026-02-24)
+
+Add manual login option (`avo login --force-manual` / `-m`) for environments where the local OAuth redirect doesn't work
+Support pasting the full redirect URL during manual login
+
 ## 3.3.1 (2026-02-03)
 
 Update dependencies
