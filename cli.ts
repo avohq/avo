@@ -718,7 +718,8 @@ function init(): Promise<AvoJson> {
             {
               type: 'list',
               name: 'schema',
-              message: 'Your Avo workspace contains your tracking plan, sources, and branches.\nSelect a workspace to initialize',
+              message:
+                'Your Avo workspace contains your tracking plan, sources, and branches.\nSelect a workspace to initialize',
               choices,
             },
           ])
