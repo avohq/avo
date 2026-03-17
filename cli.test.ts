@@ -10,6 +10,10 @@ import {
   isFilePerEventMode,
   eventNameToFileName,
   cleanupObsoleteEventFiles,
+  buildFolderMessage,
+  buildInterfaceFolderMessage,
+  buildFilenameMessage,
+  buildInterfaceFilenameMessage,
 } from './cli.js';
 
 describe('File-per-event cleanup helper functions', () => {
@@ -284,3 +288,38 @@ describe('File-per-event cleanup helper functions', () => {
   });
 });
 
+describe('Prompt message helpers', () => {
+  it('buildFolderMessage includes the provided outputDirExample', () => {
+    const result = buildFolderMessage({
+      outputDirExample: 'app/src/main/kotlin/analytics',
+    });
+    expect(result).toContain('app/src/main/kotlin/analytics');
+  });
+
+  it('buildFolderMessage falls back to src/analytics when outputDirExample is omitted', () => {
+    const result = buildFolderMessage({});
+    expect(result).toContain('src/analytics');
+  });
+
+  it('buildInterfaceFolderMessage includes the provided outputDirExample', () => {
+    const result = buildInterfaceFolderMessage({
+      outputDirExample: 'Sources/Analytics',
+    });
+    expect(result).toContain('Sources/Analytics');
+  });
+
+  it('buildInterfaceFolderMessage falls back to src/analytics when outputDirExample is omitted', () => {
+    const result = buildInterfaceFolderMessage({});
+    expect(result).toContain('src/analytics');
+  });
+
+  it("buildFilenameMessage mentions avo pull regeneration", () => {
+    const result = buildFilenameMessage();
+    expect(result).toContain("This file is regenerated on every 'avo pull'");
+  });
+
+  it('buildInterfaceFilenameMessage mentions safe to customize', () => {
+    const result = buildInterfaceFilenameMessage();
+    expect(result).toContain('safe to customize');
+  });
+});
