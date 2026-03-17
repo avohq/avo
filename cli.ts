@@ -1244,6 +1244,33 @@ type ApiSourcesResult = {
   ];
 };
 
+// Prompt message helpers — exported for testing
+export function buildFolderMessage(source: {
+  outputDirExample?: string;
+}): string {
+  const examplePath = source.outputDirExample ?? 'src/analytics';
+  const folderDescription =
+    'Generated telemetry code — place it inside your source tree';
+  return `${folderDescription}\n(e.g. ${examplePath})`;
+}
+
+export function buildInterfaceFolderMessage(source: {
+  outputDirExample?: string;
+}): string {
+  const examplePath = source.outputDirExample ?? 'src/analytics';
+  const interfaceFolderDescription =
+    'Generated interface file — place it inside your source tree';
+  return `${interfaceFolderDescription}\n(e.g. ${examplePath})`;
+}
+
+export function buildFilenameMessage(): string {
+  return "This file is regenerated on every 'avo pull' — do not edit it manually";
+}
+
+export function buildInterfaceFilenameMessage(): string {
+  return 'This file is only regenerated if you delete it — safe to customize';
+}
+
 function selectSource(sourceToAdd: string, json: AvoJson) {
   wait('Fetching sources');
   return api
@@ -1266,6 +1293,15 @@ function selectSource(sourceToAdd: string, json: AvoJson) {
           return 0;
         });
 
+      // Resolve source early when sourceToAdd is provided, so the folder
+      // prompt can show a platform-specific example path
+      const resolvedSource = sourceToAdd
+        ? sources.find((s) => matchesSource(s, sourceToAdd))
+        : null;
+      if (sourceToAdd && !resolvedSource) {
+        throw new AvoError(`Source ${sourceToAdd} does not exist`);
+      }
+
       const prompts: any[] = [
         {
           type: 'fuzzypath',
@@ -1276,7 +1312,8 @@ function selectSource(sourceToAdd: string, json: AvoJson) {
           itemType: 'directory',
           rootPath: '.',
           // @ts-ignore — message is a callback to access selected source's outputDirExample
-          message: (answers) => buildFolderMessage(answers.source ?? {}),
+          message: (answers) =>
+            buildFolderMessage(answers.source ?? resolvedSource ?? {}),
           default: '.',
           suggestOnly: false,
           depthLimit: 10,
@@ -1308,12 +1345,7 @@ function selectSource(sourceToAdd: string, json: AvoJson) {
           },
         });
       } else {
-        const source = sources.find((soruceToFind) =>
-          matchesSource(soruceToFind, sourceToAdd),
-        );
-        if (!source) {
-          throw new AvoError(`Source ${sourceToAdd} does not exist`);
-        }
+        const source = resolvedSource!;
         prompts.push({
           type: 'input',
           name: 'filename',
@@ -1610,33 +1642,6 @@ export function cleanupObsoleteEventFiles(
       }
     }
   });
-}
-
-// Prompt message helpers — exported for testing
-export function buildFolderMessage(source: {
-  outputDirExample?: string;
-}): string {
-  const examplePath = source.outputDirExample ?? 'src/analytics';
-  const folderDescription =
-    'Generated telemetry code — place it inside your source tree';
-  return `${folderDescription}\n(e.g. ${examplePath})`;
-}
-
-export function buildInterfaceFolderMessage(source: {
-  outputDirExample?: string;
-}): string {
-  const examplePath = source.outputDirExample ?? 'src/analytics';
-  const interfaceFolderDescription =
-    'Generated interface file — place it inside your source tree';
-  return `${interfaceFolderDescription}\n(e.g. ${examplePath})`;
-}
-
-export function buildFilenameMessage(): string {
-  return "This file is regenerated on every 'avo pull' — do not edit it manually";
-}
-
-export function buildInterfaceFilenameMessage(): string {
-  return 'This file is only regenerated if you delete it — safe to customize';
 }
 
 function getSource(argv, json: AvoJson): Promise<[string, AvoJson]> {
