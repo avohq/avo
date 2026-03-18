@@ -718,8 +718,7 @@ function init(): Promise<AvoJson> {
             {
               type: 'list',
               name: 'schema',
-              message:
-                'Select a workspace to initialize',
+              message: 'Select a workspace to initialize',
               choices,
             },
           ])
