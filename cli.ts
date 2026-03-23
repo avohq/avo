@@ -1268,7 +1268,7 @@ export function buildFilenameMessage(): string {
 }
 
 export function buildInterfaceFilenameMessage(): string {
-  return 'This file is only regenerated if you delete it — safe to customize';
+  return "This file is regenerated on every 'avo pull' — do not edit it manually";
 }
 
 function selectSource(sourceToAdd: string, json: AvoJson) {
