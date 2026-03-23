@@ -1236,6 +1236,7 @@ type ApiSourcesResult = {
       id: string;
       name: string;
       filenameHint: string;
+      interfaceFilenameHint?: string;
       canHaveInterfaceFile: boolean;
       language: string;
       platform: string;
@@ -1388,7 +1389,10 @@ function selectSource(sourceToAdd: string, json: AvoJson) {
                   message: buildInterfaceFilenameMessage(),
                   // @ts-ignore
                   default() {
-                    return answerSource.filenameHint;
+                    return (
+                      answerSource.interfaceFilenameHint ??
+                      answerSource.filenameHint
+                    );
                   },
                 },
               ]
