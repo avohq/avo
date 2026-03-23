@@ -318,8 +318,8 @@ describe('Prompt message helpers', () => {
     expect(result).toContain("This file is regenerated on every 'avo pull'");
   });
 
-  it('buildInterfaceFilenameMessage mentions safe to customize', () => {
+  it('buildInterfaceFilenameMessage mentions avo pull regeneration', () => {
     const result = buildInterfaceFilenameMessage();
-    expect(result).toContain('safe to customize');
+    expect(result).toContain("This file is regenerated on every 'avo pull'");
   });
 });

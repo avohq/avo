@@ -1236,6 +1236,7 @@ type ApiSourcesResult = {
       id: string;
       name: string;
       filenameHint: string;
+      interfaceFilenameHint?: string;
       canHaveInterfaceFile: boolean;
       language: string;
       platform: string;
@@ -1268,7 +1269,7 @@ export function buildFilenameMessage(): string {
 }
 
 export function buildInterfaceFilenameMessage(): string {
-  return 'This file is only regenerated if you delete it — safe to customize';
+  return "This file is regenerated on every 'avo pull' — do not edit it manually";
 }
 
 function selectSource(sourceToAdd: string, json: AvoJson) {
@@ -1388,7 +1389,10 @@ function selectSource(sourceToAdd: string, json: AvoJson) {
                   message: buildInterfaceFilenameMessage(),
                   // @ts-ignore
                   default() {
-                    return answerSource.filenameHint;
+                    return (
+                      answerSource.interfaceFilenameHint ??
+                      answerSource.filenameHint
+                    );
                   },
                 },
               ]
