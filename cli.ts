@@ -1237,9 +1237,39 @@ type ApiSourcesResult = {
       name: string;
       filenameHint: string;
       canHaveInterfaceFile: boolean;
+      language: string;
+      platform: string;
+      outputDirExample?: string;
     },
   ];
 };
+
+// Prompt message helpers — exported for testing
+export function buildFolderMessage(source: {
+  outputDirExample?: string;
+}): string {
+  const examplePath = source.outputDirExample ?? 'src/analytics';
+  const folderDescription =
+    'Generated telemetry code — place it inside your source tree';
+  return `${folderDescription}\n(e.g. ${examplePath})`;
+}
+
+export function buildInterfaceFolderMessage(source: {
+  outputDirExample?: string;
+}): string {
+  const examplePath = source.outputDirExample ?? 'src/analytics';
+  const interfaceFolderDescription =
+    'Generated interface file — place it inside your source tree';
+  return `${interfaceFolderDescription}\n(e.g. ${examplePath})`;
+}
+
+export function buildFilenameMessage(): string {
+  return "This file is regenerated on every 'avo pull' — do not edit it manually";
+}
+
+export function buildInterfaceFilenameMessage(): string {
+  return 'This file is only regenerated if you delete it — safe to customize';
+}
 
 function selectSource(sourceToAdd: string, json: AvoJson) {
   wait('Fetching sources');
@@ -1263,7 +1293,16 @@ function selectSource(sourceToAdd: string, json: AvoJson) {
           return 0;
         });
 
-      const prompts = [
+      // Resolve source early when sourceToAdd is provided, so the folder
+      // prompt can show a platform-specific example path
+      const resolvedSource = sourceToAdd
+        ? sources.find((s) => matchesSource(s, sourceToAdd))
+        : null;
+      if (sourceToAdd && !resolvedSource) {
+        throw new AvoError(`Source ${sourceToAdd} does not exist`);
+      }
+
+      const prompts: any[] = [
         {
           type: 'fuzzypath',
           name: 'folder',
@@ -1272,7 +1311,9 @@ function selectSource(sourceToAdd: string, json: AvoJson) {
             maybeExcludePath.startsWith('.git'),
           itemType: 'directory',
           rootPath: '.',
-          message: 'Select a folder to save the analytics wrapper in',
+          // @ts-ignore — message is a callback to access selected source's outputDirExample
+          message: (answers) =>
+            buildFolderMessage(answers.source ?? resolvedSource ?? {}),
           default: '.',
           suggestOnly: false,
           depthLimit: 10,
@@ -1288,7 +1329,8 @@ function selectSource(sourceToAdd: string, json: AvoJson) {
         prompts.unshift({
           type: 'list',
           name: 'source',
-          message: 'Select a source to set up',
+          message:
+            'In Avo, a source represents one platform/language target for codegen.\nSelect a source to set up',
           // @ts-ignore
           choices,
           pageSize: 15,
@@ -1296,23 +1338,18 @@ function selectSource(sourceToAdd: string, json: AvoJson) {
         prompts.push({
           type: 'input',
           name: 'filename',
-          message: 'Select a filename for the analytics wrapper',
+          message: buildFilenameMessage(),
           // @ts-ignore
           default(answers) {
             return answers.source.filenameHint;
           },
         });
       } else {
-        const source = sources.find((soruceToFind) =>
-          matchesSource(soruceToFind, sourceToAdd),
-        );
-        if (!source) {
-          throw new AvoError(`Source ${sourceToAdd} does not exist`);
-        }
+        const source = resolvedSource!;
         prompts.push({
           type: 'input',
           name: 'filename',
-          message: 'Select a filename for the library',
+          message: buildFilenameMessage(),
           // @ts-ignore
           default() {
             return source.filenameHint;
@@ -1340,8 +1377,7 @@ function selectSource(sourceToAdd: string, json: AvoJson) {
                     maybeExcludePath.startsWith('.git'),
                   itemType: 'directory',
                   rootPath: '.',
-                  message:
-                    'Select a folder to save the analytics wrapper interface file in',
+                  message: buildInterfaceFolderMessage(answerSource),
                   default: '.',
                   suggestOnly: false,
                   depthLimit: 10,
@@ -1349,8 +1385,7 @@ function selectSource(sourceToAdd: string, json: AvoJson) {
                 {
                   type: 'input',
                   name: 'interfaceFilename',
-                  message: (_answers) =>
-                    'Select a filename for the analytics wrapper interface file',
+                  message: buildInterfaceFilenameMessage(),
                   // @ts-ignore
                   default() {
                     return answerSource.filenameHint;
