@@ -4,7 +4,7 @@
 
 Support `interfaceFilenameHint` from backend API
 Improve CLI setup flow prompts with context-aware descriptions
-Fix consistent regeneration message for interface filename prompt
+Fix inconsistent regeneration message for interface filename prompt
 Fix helpers ordering and sourceToAdd flow in CLI setup
 Update dependencies (minimatch, flatted, semver, prettier)
 
