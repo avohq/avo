@@ -3,3 +3,5 @@ yarn-error.log
 cli.js
 Avo.js
 reporter.js
+package-lock.json
+.DS_Store
