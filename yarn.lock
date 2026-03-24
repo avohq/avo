@@ -3843,11 +3843,11 @@ minimatch@^5.0.1:
     brace-expansion "^2.0.1"
 
 minimatch@^7.0.0:
-  version "7.4.7"
-  resolved "https://registry.yarnpkg.com/minimatch/-/minimatch-7.4.7.tgz#a27ce8f2b8cb7d662fd416c779504f121173d54a"
-  integrity sha512-t3SrsBRdssa8F/nFEadAxveFpnbhlbq7FiizzOMqx69w9EbmNEzcKiPkc60udvrOkWsTMm6jmnQP1c5rbdVfSA==
+  version "7.4.9"
+  resolved "https://registry.yarnpkg.com/minimatch/-/minimatch-7.4.9.tgz#ef35412b1b36261b78ef1b2f0db29b759bbcaf5d"
+  integrity sha512-Brg/fp/iAVDOQoHxkuN5bEYhyQlZhxddI78yWsCbeEwTHXQjlNLtiJDUsp1GIptVqMI7/gkJMz4vVAc01mpoBw==
   dependencies:
-    brace-expansion "^2.0.1"
+    brace-expansion "^2.0.2"
 
 minimist@^1.2.0, minimist@^1.2.5, minimist@^1.2.6:
   version "1.2.8"
