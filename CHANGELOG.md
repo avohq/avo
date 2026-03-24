@@ -1,5 +1,13 @@
 ## Unreleased
 
+## 3.5.0 (2026-03-24)
+
+Support `interfaceFilenameHint` from backend API
+Improve CLI setup flow prompts with context-aware descriptions
+Fix consistent regeneration message for interface filename prompt
+Fix helpers ordering and sourceToAdd flow in CLI setup
+Update dependencies (minimatch, flatted, semver, prettier)
+
 ## 3.4.0 (2026-02-24)
 
 Add manual login option (`avo login --force-manual` / `-m`) for environments where the local OAuth redirect doesn't work
