@@ -37,7 +37,7 @@
     "got": "^12.1.0",
     "http-shutdown": "^1.2.0",
     "ignore-walk": "^5.0.1",
-    "inquirer": "8.2.6",
+    "inquirer": "13.3.2",
     "inquirer-fuzzy-path": "^2.3.0",
     "jsonwebtoken": "^9.0.3",
     "load-json-file": "^7.0.1",
