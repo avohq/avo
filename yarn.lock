@@ -3885,9 +3885,11 @@ neo-async@^2.6.2:
   integrity sha512-Yd3UES5mWCSqR+qNT93S3UoYUkqAZ9lLg8a7g9rimsWmYGK8cVToA4/sF3RrshdyV3sAGMXVUmpMYOw+dLpOuw==
 
 node-avo-inspector@^1.0.1:
-  version "1.1.1"
-  resolved "https://registry.yarnpkg.com/node-avo-inspector/-/node-avo-inspector-1.1.1.tgz#37a4a34db9315c5659958db381f97e93144abd2f"
-  integrity sha512-GiAwvlYRMDBVnjMDsotxOyB8Rysr2VfVNjo2TGpUVC96MtUxiho8uP7FWjMbSDkYrMY2ZM9j2Htf+O8mx1/H+A==
+  version "1.2.0"
+  resolved "https://registry.yarnpkg.com/node-avo-inspector/-/node-avo-inspector-1.2.0.tgz#4b65e3fd2617b45f75d7adc4b733076370d97953"
+  integrity sha512-9+paV0wWZTNHY3663FHEigmnt5CHC/mLjp2UX1Ep4AzI7vED5y9bUzjUP4zR8b/a2V8g0BF6BQqT9oshTV0/wQ==
+  dependencies:
+    safe-regex2 "^5.0.0"
 
 node-int64@^0.4.0:
   version "0.4.0"
@@ -4445,6 +4447,11 @@ restore-cursor@^4.0.0:
     onetime "^5.1.0"
     signal-exit "^3.0.2"
 
+ret@~0.5.0:
+  version "0.5.0"
+  resolved "https://registry.yarnpkg.com/ret/-/ret-0.5.0.tgz#30a4d38a7e704bd96dc5ffcbe7ce2a9274c41c95"
+  integrity sha512-I1XxrZSQ+oErkRR4jYbAyEEu2I0avBvvMM5JN+6EBprOGRCs63ENqZ3vjavq8fBw2+62G5LF5XelKwuJpcvcxw==
+
 reusify@^1.0.4:
   version "1.0.4"
   resolved "https://registry.yarnpkg.com/reusify/-/reusify-1.0.4.tgz#90da382b1e126efc02146e90845a88db12925d76"
@@ -4522,6 +4529,13 @@ safe-regex-test@^1.1.0:
     call-bound "^1.0.2"
     es-errors "^1.3.0"
     is-regex "^1.2.1"
+
+safe-regex2@^5.0.0:
+  version "5.1.0"
+  resolved "https://registry.yarnpkg.com/safe-regex2/-/safe-regex2-5.1.0.tgz#758fd224d066f5abe24f67bd574a01c9dd447f51"
+  integrity sha512-pNHAuBW7TrcleFHsxBr5QMi/Iyp0ENjUKz7GCcX1UO7cMh+NmVK6HxQckNL1tJp1XAJVjG6B8OKIPqodqj9rtw==
+  dependencies:
+    ret "~0.5.0"
 
 "safer-buffer@>= 2.1.2 < 3":
   version "2.1.2"
