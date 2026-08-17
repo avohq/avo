@@ -1214,6 +1214,18 @@ function writeAvoJson(json: AvoJson): Promise<AvoJson> {
   }).then(() => json);
 }
 
+type ApiPullTarget = {
+  id: string;
+  actionId: string;
+  name: string;
+  branchId: string;
+  updatedAt: string;
+  code: { path: string; content: string }[];
+  // Paths codegen filtered out for this source. Optional in both directions: an
+  // older codegen simply sends none and the CLI warns about nothing.
+  suppressedPaths?: string[];
+};
+
 // Helper function to map targets to sources and filter out nulls
 function mapTargetsToSources<
   T extends { id: string },
@@ -1234,9 +1246,42 @@ function mapTargetsToSources<
     );
 }
 
+// Warn, never delete: this feature exists to stop codegen touching files it does
+// not own, and removing a file the CLI did not create is the same mistake with the
+// sign flipped. The paths come from the response — the CLI derives none of them.
+export function collectStaleSuppressedFiles(
+  suppressedPaths: string[] | undefined,
+  exists: (suppressedPath: string) => boolean,
+): string[] {
+  return (suppressedPaths ?? []).filter((suppressedPath) =>
+    exists(suppressedPath),
+  );
+}
+
+export function buildStaleSuppressedFileWarning(
+  suppressedPath: string,
+): string {
+  return `[avo] Warning: ${file(
+    suppressedPath,
+  )} is no longer generated here and will shadow the shared interface; remove it.`;
+}
+
 export function codegen(
   json: AvoJson,
-  { schema, sources: targets, warnings, success, errors },
+  {
+    schema,
+    sources: targets,
+    warnings,
+    success,
+    errors,
+  }: {
+    schema: Schema;
+    sources: ApiPullTarget[];
+    warnings?: unknown;
+    success?: unknown;
+    errors?: unknown;
+  },
+  libraryInterfaceFileFilterOverride?: LibraryInterfaceFileFilter,
 ) {
   const newJson: AvoJson = { ...JSON.parse(JSON.stringify(json)), schema };
 
@@ -1348,6 +1393,23 @@ export function codegen(
             );
           }
         }
+      });
+
+    mapTargetsToSources(targets, newJson.sources)
+      .filter(
+        ({ source }) =>
+          resolveLibraryInterfaceFileFilter({
+            flag: libraryInterfaceFileFilterOverride,
+            source,
+            json,
+          }) !== 'all',
+      )
+      .forEach(({ target }) => {
+        collectStaleSuppressedFiles(target.suppressedPaths, (suppressedPath) =>
+          fs.existsSync(suppressedPath),
+        ).forEach((suppressedPath) => {
+          report.warn(buildStaleSuppressedFileWarning(suppressedPath));
+        });
       });
 
     if (errors !== undefined && errors !== null && errors !== '') {
@@ -1608,11 +1670,11 @@ type ApiPullResult = {
   branchName: string;
   reason: string;
   closedAt: string; // Datestring
-  sources: [];
+  sources: ApiPullTarget[];
   warnings: object;
   success: object;
   errors: object;
-  schema: object;
+  schema: Schema;
 };
 
 export function buildPullRequestBody(
@@ -1646,7 +1708,11 @@ export function applyPullResult(
   result: ApiPullResult,
   libraryInterfaceFileFilterOverride?: LibraryInterfaceFileFilter,
   deps: {
-    runCodegen?: (avoJson: AvoJson, pullResult: ApiPullResult) => void;
+    runCodegen?: (
+      avoJson: AvoJson,
+      pullResult: ApiPullResult,
+      override?: LibraryInterfaceFileFilter,
+    ) => void;
     retry?: (
       filter,
       avoJson: AvoJson,
@@ -1663,7 +1729,7 @@ export function applyPullResult(
     });
 
   if (result.ok) {
-    runCodegen(json, result);
+    runCodegen(json, result, libraryInterfaceFileFilterOverride);
     return;
   }
 

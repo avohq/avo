@@ -38,6 +38,8 @@ import {
   buildLibraryInterfaceFileFilterPrompt,
   resolveInitLibraryInterfaceFileFilter,
   init,
+  collectStaleSuppressedFiles,
+  buildStaleSuppressedFileWarning,
 } from './cli.js';
 
 describe('File-per-event cleanup helper functions', () => {
@@ -814,7 +816,7 @@ describe('libraryInterfaceFileFilter', () => {
         retry,
       });
 
-      expect(runCodegen).toHaveBeenCalledWith(json, result);
+      expect(runCodegen).toHaveBeenCalledWith(json, result, 'events-only');
       expect(retry).not.toHaveBeenCalled();
     });
 
@@ -1116,6 +1118,213 @@ describe('avo init and libraryInterfaceFileFilter', () => {
       expect(promptFn).not.toHaveBeenCalled();
       expect(json.schema.id).toBe('schema-1');
       expect('libraryInterfaceFileFilter' in json).toBe(false);
+    });
+  });
+});
+
+describe('stale files from a previous filter', () => {
+  describe('collectStaleSuppressedFiles', () => {
+    it('keeps only the suppressed paths that exist on disk', () => {
+      const exists = (p: string) => p === 'src/AvoLibrary.ts';
+
+      expect(
+        collectStaleSuppressedFiles(
+          ['src/AvoLibrary.ts', 'src/AvoConfig.ts'],
+          exists,
+        ),
+      ).toEqual(['src/AvoLibrary.ts']);
+    });
+
+    it('preserves response order for multiple stale paths', () => {
+      expect(
+        collectStaleSuppressedFiles(['b.ts', 'a.ts', 'c.ts'], () => true),
+      ).toEqual(['b.ts', 'a.ts', 'c.ts']);
+    });
+
+    it('returns nothing for an absent or empty suppressedPaths', () => {
+      expect(collectStaleSuppressedFiles(undefined, () => true)).toEqual([]);
+      expect(collectStaleSuppressedFiles([], () => true)).toEqual([]);
+    });
+  });
+
+  describe('buildStaleSuppressedFileWarning', () => {
+    it('names the file and says it will shadow the shared interface', () => {
+      const warning = buildStaleSuppressedFileWarning('src/AvoLibrary.ts');
+
+      expect(warning).toContain('[avo] Warning:');
+      expect(warning).toContain('src/AvoLibrary.ts');
+      expect(warning).toContain('shadow');
+      expect(warning).toMatch(/no longer generated/i);
+    });
+  });
+
+  describe('codegen', () => {
+    let tempDir: string;
+    let previousCwd: string;
+    let logSpy: any;
+
+    beforeEach(() => {
+      previousCwd = process.cwd();
+      tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'avo-test-'));
+      process.chdir(tempDir);
+      logSpy = jest.spyOn(console, 'log').mockImplementation(() => undefined);
+    });
+
+    afterEach(() => {
+      logSpy.mockRestore();
+      process.chdir(previousCwd);
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    });
+
+    const staleWarnings = () =>
+      logSpy.mock.calls
+        .map((call: unknown[]) => call.join(' '))
+        .filter((line: string) => line.includes('[avo] Warning:'));
+
+    const jsonWith = (
+      libraryInterfaceFileFilter?: string,
+      sourcePath = 'src/Avo.ts',
+    ): any => ({
+      avo: { version: 3 },
+      schema: { id: 'schema-1', name: 'Test Workspace' },
+      branch: { id: 'master', name: 'main' },
+      ...(libraryInterfaceFileFilter === undefined
+        ? {}
+        : { libraryInterfaceFileFilter }),
+      sources: [
+        {
+          id: 'source-1',
+          name: 'Web',
+          path: sourcePath,
+          interfacePath: sourcePath,
+          actionId: 'action-1',
+          branchId: 'master',
+          updatedAt: '2026-08-01T00:00:00.000Z',
+        },
+      ],
+    });
+
+    const target = (extra: object = {}) => ({
+      id: 'source-1',
+      actionId: 'action-2',
+      name: 'Web',
+      branchId: 'master',
+      updatedAt: '2026-08-02T00:00:00.000Z',
+      code: [{ path: 'src/AvoEvents/eventClicked.ts', content: '// event' }],
+      ...extra,
+    });
+
+    const result = (extra: object = {}): any => ({
+      schema: { id: 'schema-1', name: 'Test Workspace' },
+      sources: [target(extra)],
+      warnings: [],
+      success: [],
+      errors: '',
+    });
+
+    it('warns about a stale suppressed file and never deletes it', async () => {
+      fs.mkdirSync('src', { recursive: true });
+      fs.writeFileSync('src/AvoLibrary.ts', '// stale shared interface');
+
+      await codegen(
+        jsonWith('events-only'),
+        result({ suppressedPaths: ['src/AvoLibrary.ts'] }),
+      );
+
+      const warnings = staleWarnings();
+      expect(warnings).toHaveLength(1);
+      expect(warnings[0]).toContain('src/AvoLibrary.ts');
+      expect(fs.existsSync('src/AvoLibrary.ts')).toBe(true);
+      expect(fs.readFileSync('src/AvoLibrary.ts', 'utf8')).toBe(
+        '// stale shared interface',
+      );
+    });
+
+    it('does not warn about a suppressed path that is not on disk', async () => {
+      await codegen(
+        jsonWith('events-only'),
+        result({ suppressedPaths: ['src/AvoLibrary.ts'] }),
+      );
+
+      expect(staleWarnings()).toEqual([]);
+    });
+
+    it("does not warn when the resolved filter is 'all'", async () => {
+      fs.mkdirSync('src', { recursive: true });
+      fs.writeFileSync('src/AvoLibrary.ts', '// stale');
+
+      await codegen(
+        jsonWith(undefined),
+        result({ suppressedPaths: ['src/AvoLibrary.ts'] }),
+      );
+
+      expect(staleWarnings()).toEqual([]);
+    });
+
+    it('warns when the per-run override is the reason files were suppressed', async () => {
+      fs.mkdirSync('src', { recursive: true });
+      fs.writeFileSync('src/AvoLibrary.ts', '// stale');
+
+      await codegen(
+        jsonWith(undefined),
+        result({ suppressedPaths: ['src/AvoLibrary.ts'] }),
+        'events-only',
+      );
+
+      expect(staleWarnings()).toHaveLength(1);
+    });
+
+    it('does not throw or warn when the response has no suppressedPaths', async () => {
+      fs.mkdirSync('src', { recursive: true });
+      fs.writeFileSync('src/AvoLibrary.ts', '// stale');
+
+      await expect(
+        codegen(jsonWith('events-only'), result()),
+      ).resolves.toBeUndefined();
+      expect(staleWarnings()).toEqual([]);
+    });
+
+    it('emits one warning line per stale path, in response order', async () => {
+      fs.mkdirSync('src', { recursive: true });
+      fs.writeFileSync('src/Avo.ts', '// stale app file');
+      fs.writeFileSync('src/AvoConfig.ts', '// stale config');
+
+      await codegen(
+        jsonWith('interface-only'),
+        result({
+          suppressedPaths: ['src/AvoConfig.ts', 'src/Missing.ts', 'src/Avo.ts'],
+        }),
+      );
+
+      const warnings = staleWarnings();
+      expect(warnings).toHaveLength(2);
+      expect(warnings[0]).toContain('src/AvoConfig.ts');
+      expect(warnings[1]).toContain('src/Avo.ts');
+    });
+
+    it('leaves the per-event directory intact under interface-only', async () => {
+      fs.mkdirSync('src/AvoEvents', { recursive: true });
+      fs.writeFileSync(
+        'src/Avo.ts',
+        [
+          '// AVOMODULEMAP: "Avo"',
+          '// AVOEVENTMAP: ["EventClicked", "EventViewed"]',
+        ].join('\n'),
+      );
+      fs.writeFileSync('src/AvoEvents/eventClicked.ts', '// event');
+      fs.writeFileSync('src/AvoEvents/eventViewed.ts', '// event');
+
+      // interface-only means the main file is absent from the response, so the
+      // per-event cleanup gate never opens and nothing under AvoEvents/ is touched.
+      await codegen(
+        jsonWith('interface-only'),
+        result({
+          code: [{ path: 'src/AvoLibrary.ts', content: '// interface' }],
+        }),
+      );
+
+      expect(fs.existsSync('src/AvoEvents/eventClicked.ts')).toBe(true);
+      expect(fs.existsSync('src/AvoEvents/eventViewed.ts')).toBe(true);
     });
   });
 });
