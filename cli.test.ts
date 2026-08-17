@@ -14,6 +14,9 @@ import {
   buildInterfaceFolderMessage,
   buildFilenameMessage,
   buildInterfaceFilenameMessage,
+  extractConflictingFiles,
+  buildResolvedAvoJson,
+  findUnresolvableAvoJsonConflict,
 } from './cli.js';
 
 describe('File-per-event cleanup helper functions', () => {
@@ -321,5 +324,124 @@ describe('Prompt message helpers', () => {
   it('buildInterfaceFilenameMessage mentions avo pull regeneration', () => {
     const result = buildInterfaceFilenameMessage();
     expect(result).toContain("This file is regenerated on every 'avo pull'");
+  });
+});
+
+describe('avo.json merge conflict resolution', () => {
+  // Both the feature's own key and an UNRELATED unknown key are deliberately placed on
+  // the HEAD side of the conflict: the resolution keeps HEAD-side top-level state, so
+  // that is the only side where the drop is observable.
+  const conflictedAvoJson = [
+    '{',
+    '  "avo": { "version": 3 },',
+    '  "schema": { "id": "schema-1", "name": "Test Workspace" },',
+    '<<<<<<< HEAD',
+    '  "branch": { "id": "branch-head", "name": "head-branch" },',
+    '  "libraryInterfaceFileFilter": "events-only",',
+    '  "teamNote": "shared interface repo",',
+    '=======',
+    '  "branch": { "id": "branch-incoming", "name": "incoming-branch" },',
+    '>>>>>>> incoming',
+    '  "sources": [',
+    '    {',
+    '      "id": "source-1",',
+    '      "name": "Web",',
+    '      "path": "src/Avo.ts",',
+    '      "actionId": "action-1",',
+    '      "branchId": "branch-head",',
+    '      "updatedAt": "2026-08-01T00:00:00.000Z",',
+    '      "libraryInterfaceFileFilter": "interface-only"',
+    '    }',
+    '  ]',
+    '}',
+  ].join('\n');
+
+  const parseConflictSides = (file: string) => {
+    const [headFile, incomingFile] = extractConflictingFiles(file);
+    return [JSON.parse(headFile), JSON.parse(incomingFile)];
+  };
+
+  describe('extractConflictingFiles', () => {
+    it('splits a conflicted avo.json into two parseable sides', () => {
+      const [head, incoming] = parseConflictSides(conflictedAvoJson);
+
+      expect(head.branch.id).toBe('branch-head');
+      expect(incoming.branch.id).toBe('branch-incoming');
+      expect(head.libraryInterfaceFileFilter).toBe('events-only');
+      expect(incoming.libraryInterfaceFileFilter).toBeUndefined();
+    });
+  });
+
+  describe('buildResolvedAvoJson', () => {
+    it('preserves unknown top-level state, not just the keys it knows about', () => {
+      const [head] = parseConflictSides(conflictedAvoJson);
+
+      const resolved = buildResolvedAvoJson(head) as Record<string, any>;
+
+      // The unrelated key is the real assertion: it locks the class of behaviour
+      // (unknown top-level state survives) rather than one field, so a whitelist
+      // that merely gained `libraryInterfaceFileFilter` would not satisfy it.
+      expect(resolved.teamNote).toBe('shared interface repo');
+      expect(resolved.libraryInterfaceFileFilter).toBe('events-only');
+    });
+
+    it('takes avo, schema, branch and sources from HEAD', () => {
+      const [head] = parseConflictSides(conflictedAvoJson);
+
+      const resolved = buildResolvedAvoJson(head) as Record<string, any>;
+
+      expect(resolved.avo).toEqual({ version: 3 });
+      expect(resolved.schema).toEqual({ id: 'schema-1', name: 'Test Workspace' });
+      expect(resolved.branch).toEqual({
+        id: 'branch-head',
+        name: 'head-branch',
+      });
+      expect(resolved.sources).toEqual(head.sources);
+    });
+
+    it('keeps a per-source key on a HEAD source', () => {
+      const [head] = parseConflictSides(conflictedAvoJson);
+
+      const resolved = buildResolvedAvoJson(head) as Record<string, any>;
+
+      expect(resolved.sources[0].libraryInterfaceFileFilter).toBe(
+        'interface-only',
+      );
+    });
+  });
+
+  describe('findUnresolvableAvoJsonConflict', () => {
+    it('returns null when the conflict is automatically resolvable', () => {
+      const [head, incoming] = parseConflictSides(conflictedAvoJson);
+
+      expect(findUnresolvableAvoJsonConflict(head, incoming)).toBeNull();
+    });
+
+    it('bails out on a mismatched avo version', () => {
+      const [head, incoming] = parseConflictSides(conflictedAvoJson);
+      incoming.avo = { version: 2 };
+
+      expect(findUnresolvableAvoJsonConflict(head, incoming)).toBe(
+        "Could not automatically resolve merge conflicts in avo.json. Resolve merge conflicts in avo.json before running 'avo pull' again.",
+      );
+    });
+
+    it('bails out on a mismatched schema id', () => {
+      const [head, incoming] = parseConflictSides(conflictedAvoJson);
+      incoming.schema = { id: 'schema-2', name: 'Other Workspace' };
+
+      expect(findUnresolvableAvoJsonConflict(head, incoming)).toBe(
+        "Could not automatically resolve merge conflicts in avo.json. Resolve merge conflicts in avo.json before running 'avo pull' again.",
+      );
+    });
+
+    it('bails out on a conflicted sources list', () => {
+      const [head, incoming] = parseConflictSides(conflictedAvoJson);
+      incoming.sources = [{ ...incoming.sources[0], id: 'source-2' }];
+
+      expect(findUnresolvableAvoJsonConflict(head, incoming)).toBe(
+        "Could not automatically resolve merge conflicts in avo.json. Resolve merge conflicts in sources list in avo.json before running 'avo pull' again.",
+      );
+    });
   });
 });

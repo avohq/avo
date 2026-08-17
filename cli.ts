@@ -517,7 +517,7 @@ function hasMergeConflicts(str: string): boolean {
   );
 }
 
-function extractConflictingFiles(str: string): [string, string] {
+export function extractConflictingFiles(str: string): [string, string] {
   const files = [[], []];
   const lines = str.split(/\r?\n/g);
   let skip = false;
@@ -855,6 +855,40 @@ function checkout(branchToCheckout: string, json: AvoJson): Promise<AvoJson> {
   });
 }
 
+// Spreads HEAD before the explicit keys so top-level avo.json state this CLI does not
+// know about survives conflict resolution — the result is written straight to disk, so
+// rebuilding from a fixed key list drops the unknown keys permanently.
+export function buildResolvedAvoJson(head: AvoJson): AvoJson {
+  return {
+    ...head,
+    avo: head.avo,
+    schema: head.schema,
+    branch: head.branch,
+    sources: head.sources,
+  };
+}
+
+export function findUnresolvableAvoJsonConflict(
+  head: AvoJson,
+  incoming: AvoJson,
+): string | null {
+  if (
+    head.avo.version !== incoming.avo.version ||
+    head.schema.id !== incoming.schema.id
+  ) {
+    return "Could not automatically resolve merge conflicts in avo.json. Resolve merge conflicts in avo.json before running 'avo pull' again.";
+  }
+
+  if (
+    JSON.stringify(head.sources.map((s) => s.id)) !==
+    JSON.stringify(incoming.sources.map((s) => s.id))
+  ) {
+    return "Could not automatically resolve merge conflicts in avo.json. Resolve merge conflicts in sources list in avo.json before running 'avo pull' again.";
+  }
+
+  return null;
+}
+
 function resolveAvoJsonConflicts(
   avoFile: string,
   { argv, skipPullMaster }: { argv: any; skipPullMaster: boolean },
@@ -873,10 +907,8 @@ function resolveAvoJsonConflicts(
     branchName: head.branch.name,
   });
 
-  if (
-    head.avo.version !== incoming.avo.version ||
-    head.schema.id !== incoming.schema.id
-  ) {
+  const unresolvableConflict = findUnresolvableAvoJsonConflict(head, incoming);
+  if (unresolvableConflict !== null) {
     Avo.cliConflictResolveFailed({
       userId_: installIdOrUserId(),
       cliInvokedByCi: invokedByCi(),
@@ -885,34 +917,10 @@ function resolveAvoJsonConflicts(
       branchId: head.branch.id,
       branchName: head.branch.name,
     });
-    throw new Error(
-      "Could not automatically resolve merge conflicts in avo.json. Resolve merge conflicts in avo.json before running 'avo pull' again.",
-    );
+    throw new Error(unresolvableConflict);
   }
 
-  if (
-    JSON.stringify(head.sources.map((s) => s.id)) !==
-    JSON.stringify(incoming.sources.map((s) => s.id))
-  ) {
-    Avo.cliConflictResolveFailed({
-      userId_: installIdOrUserId(),
-      cliInvokedByCi: invokedByCi(),
-      schemaId: head.schema.id,
-      schemaName: head.schema.name,
-      branchId: head.branch.id,
-      branchName: head.branch.name,
-    });
-    throw new Error(
-      "Could not automatically resolve merge conflicts in avo.json. Resolve merge conflicts in sources list in avo.json before running 'avo pull' again.",
-    );
-  }
-
-  const nextAvoJson = {
-    avo: head.avo,
-    schema: head.schema,
-    branch: head.branch,
-    sources: head.sources,
-  };
+  const nextAvoJson = buildResolvedAvoJson(head);
 
   return requireAuth(argv, () =>
     fetchBranches(nextAvoJson).then((branches) => {
