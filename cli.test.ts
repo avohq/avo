@@ -816,7 +816,7 @@ describe('libraryInterfaceFileFilter', () => {
         retry,
       });
 
-      expect(runCodegen).toHaveBeenCalledWith(json, result, 'events-only');
+      expect(runCodegen).toHaveBeenCalledWith(json, result);
       expect(retry).not.toHaveBeenCalled();
     });
 
@@ -1249,26 +1249,28 @@ describe('stale files from a previous filter', () => {
       expect(staleWarnings()).toEqual([]);
     });
 
-    it("does not warn when the resolved filter is 'all'", async () => {
+    // An 'all' run is expressed by the server returning no suppressed paths, not by
+    // the CLI re-deciding locally — that is the whole point of the response-driven gate.
+    it("does not warn when the response suppressed nothing, as an 'all' run does", async () => {
       fs.mkdirSync('src', { recursive: true });
       fs.writeFileSync('src/AvoLibrary.ts', '// stale');
 
-      await codegen(
-        jsonWith(undefined),
-        result({ suppressedPaths: ['src/AvoLibrary.ts'] }),
-      );
+      await codegen(jsonWith(undefined), result({ suppressedPaths: [] }));
+      expect(staleWarnings()).toEqual([]);
 
+      await codegen(jsonWith(undefined), result());
       expect(staleWarnings()).toEqual([]);
     });
 
-    it('warns when the per-run override is the reason files were suppressed', async () => {
+    // Regression: a one-run override leaves avo.json resolving to 'all', so a locally
+    // resolved gate would swallow this warning. The response is the only thing that knows.
+    it('warns when a per-run override is the reason files were suppressed', async () => {
       fs.mkdirSync('src', { recursive: true });
       fs.writeFileSync('src/AvoLibrary.ts', '// stale');
 
       await codegen(
         jsonWith(undefined),
         result({ suppressedPaths: ['src/AvoLibrary.ts'] }),
-        'events-only',
       );
 
       expect(staleWarnings()).toHaveLength(1);

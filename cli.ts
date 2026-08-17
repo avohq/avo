@@ -1281,7 +1281,6 @@ export function codegen(
     success?: unknown;
     errors?: unknown;
   },
-  libraryInterfaceFileFilterOverride?: LibraryInterfaceFileFilter,
 ) {
   const newJson: AvoJson = { ...JSON.parse(JSON.stringify(json)), schema };
 
@@ -1395,22 +1394,17 @@ export function codegen(
         }
       });
 
-    mapTargetsToSources(targets, newJson.sources)
-      .filter(
-        ({ source }) =>
-          resolveLibraryInterfaceFileFilter({
-            flag: libraryInterfaceFileFilterOverride,
-            source,
-            json,
-          }) !== 'all',
-      )
-      .forEach(({ target }) => {
-        collectStaleSuppressedFiles(target.suppressedPaths, (suppressedPath) =>
-          fs.existsSync(suppressedPath),
-        ).forEach((suppressedPath) => {
-          report.warn(buildStaleSuppressedFileWarning(suppressedPath));
-        });
+    // Driven entirely by the response. Re-resolving the filter locally would be a
+    // second source of truth that can disagree with the server's actual decision —
+    // and it gets the one-run override case wrong the moment the two drift.
+    // suppressedPaths is non-empty only where codegen really withheld something.
+    targets.forEach((target) => {
+      collectStaleSuppressedFiles(target.suppressedPaths, (suppressedPath) =>
+        fs.existsSync(suppressedPath),
+      ).forEach((suppressedPath) => {
+        report.warn(buildStaleSuppressedFileWarning(suppressedPath));
       });
+    });
 
     if (errors !== undefined && errors !== null && errors !== '') {
       report.warn(`${errors}\n`);
@@ -1708,11 +1702,7 @@ export function applyPullResult(
   result: ApiPullResult,
   libraryInterfaceFileFilterOverride?: LibraryInterfaceFileFilter,
   deps: {
-    runCodegen?: (
-      avoJson: AvoJson,
-      pullResult: ApiPullResult,
-      override?: LibraryInterfaceFileFilter,
-    ) => void;
+    runCodegen?: (avoJson: AvoJson, pullResult: ApiPullResult) => void;
     retry?: (
       filter,
       avoJson: AvoJson,
@@ -1729,7 +1719,7 @@ export function applyPullResult(
     });
 
   if (result.ok) {
-    runCodegen(json, result, libraryInterfaceFileFilterOverride);
+    runCodegen(json, result);
     return;
   }
 
