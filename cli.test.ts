@@ -34,6 +34,10 @@ import {
   applyBranchToAvoJson,
   codegen,
   applyPullResult,
+  buildLibraryInterfaceFileFilterInfoLine,
+  buildLibraryInterfaceFileFilterPrompt,
+  resolveInitLibraryInterfaceFileFilter,
+  init,
 } from './cli.js';
 
 describe('File-per-event cleanup helper functions', () => {
@@ -837,6 +841,281 @@ describe('libraryInterfaceFileFilter', () => {
       expect(retry).toHaveBeenCalledWith('Web', json, 'interface-only');
       expect(fs.readFileSync('avo.json', 'utf8')).toBe(before);
       expect(fs.readdirSync('.')).toEqual(['avo.json']);
+    });
+  });
+});
+
+describe('avo init and libraryInterfaceFileFilter', () => {
+  const workspace = { id: 'schema-1', name: 'Test Workspace' };
+  const otherWorkspace = { id: 'schema-2', name: 'Other Workspace' };
+
+  let previousCi: string | undefined;
+  let previousIsTTY: boolean | undefined;
+
+  beforeEach(() => {
+    previousCi = process.env.CI;
+    previousIsTTY = process.stdin.isTTY;
+    delete process.env.CI;
+  });
+
+  afterEach(() => {
+    if (previousCi === undefined) {
+      delete process.env.CI;
+    } else {
+      process.env.CI = previousCi;
+    }
+    process.stdin.isTTY = previousIsTTY;
+  });
+
+  const fetchWorkspaces =
+    (...workspaces: object[]) =>
+    () =>
+      Promise.resolve({ workspaces } as any);
+
+  describe('copy helpers', () => {
+    it('the info line names the setting, its values and where to set it', () => {
+      const line = buildLibraryInterfaceFileFilterInfoLine();
+
+      expect(line).toContain('libraryInterfaceFileFilter');
+      expect(line).toContain('interface-only');
+      expect(line).toContain('events-only');
+      expect(line).toContain('all');
+      expect(line).toContain('avo.json');
+    });
+
+    it('the prompt offers all three values and explains when it applies', () => {
+      const prompt: any = buildLibraryInterfaceFileFilterPrompt();
+
+      expect(prompt.type).toBe('list');
+      expect(prompt.name).toBe('libraryInterfaceFileFilter');
+      expect(prompt.choices.map((choice: any) => choice.value)).toEqual([
+        'interface-only',
+        'events-only',
+        'all',
+      ]);
+      expect(prompt.message).toMatch(/generate/i);
+      expect(prompt.message).toMatch(/library interface/i);
+    });
+  });
+
+  describe('resolveInitLibraryInterfaceFileFilter', () => {
+    it('asks once when a TTY is present and CI is unset', async () => {
+      const promptFn = jest.fn(async () => ({
+        libraryInterfaceFileFilter: 'events-only',
+      })) as any;
+      const reportInfo = jest.fn();
+
+      const result = await resolveInitLibraryInterfaceFileFilter({
+        isTTY: true,
+        isCi: false,
+        promptFn,
+        reportInfo,
+      });
+
+      expect(promptFn).toHaveBeenCalledTimes(1);
+      expect(result).toBe('events-only');
+      expect(reportInfo).not.toHaveBeenCalled();
+    });
+
+    it('skips the prompt and prints exactly one info line without a TTY', async () => {
+      const promptFn = jest.fn();
+      const reportInfo = jest.fn();
+
+      const result = await resolveInitLibraryInterfaceFileFilter({
+        isTTY: false,
+        isCi: false,
+        promptFn: promptFn as any,
+        reportInfo,
+      });
+
+      expect(promptFn).not.toHaveBeenCalled();
+      expect(result).toBeUndefined();
+      expect(reportInfo).toHaveBeenCalledTimes(1);
+    });
+
+    it('skips the prompt in CI even with a TTY', async () => {
+      const promptFn = jest.fn();
+      const reportInfo = jest.fn();
+
+      const result = await resolveInitLibraryInterfaceFileFilter({
+        isTTY: true,
+        isCi: true,
+        promptFn: promptFn as any,
+        reportInfo,
+      });
+
+      expect(promptFn).not.toHaveBeenCalled();
+      expect(result).toBeUndefined();
+      expect(reportInfo).toHaveBeenCalledTimes(1);
+    });
+
+    it('uses the pre-answer instead of prompting, even with a TTY', async () => {
+      const promptFn = jest.fn();
+      const reportInfo = jest.fn();
+
+      const result = await resolveInitLibraryInterfaceFileFilter({
+        preAnswer: 'events-only',
+        isTTY: true,
+        isCi: false,
+        promptFn: promptFn as any,
+        reportInfo,
+      });
+
+      expect(promptFn).not.toHaveBeenCalled();
+      expect(result).toBe('events-only');
+    });
+
+    it('rejects an invalid pre-answer', () => {
+      expect(() =>
+        resolveInitLibraryInterfaceFileFilter({
+          preAnswer: 'eventsonly' as any,
+          isTTY: true,
+          isCi: false,
+        }),
+      ).toThrow(/must be one of interface-only, events-only, all/);
+    });
+  });
+
+  describe('init()', () => {
+    it('prompts on the single-workspace branch, which prompts zero times today', async () => {
+      const promptFn = jest.fn(async () => ({
+        libraryInterfaceFileFilter: 'interface-only',
+      })) as any;
+
+      const json: any = await init(undefined, {
+        fetchWorkspaces: fetchWorkspaces(workspace),
+        promptFn,
+        isTTY: true,
+        isCi: false,
+      });
+
+      expect(promptFn).toHaveBeenCalledTimes(1);
+      expect(json.libraryInterfaceFileFilter).toBe('interface-only');
+      // No library-mode gate: at init time there are no sources at all.
+      expect('sources' in json).toBe(false);
+    });
+
+    it('prompts on the multi-workspace branch too', async () => {
+      const promptFn = jest.fn(async (questions: any) => {
+        if (questions[0].name === 'schema') {
+          return { schema: otherWorkspace };
+        }
+        return { libraryInterfaceFileFilter: 'events-only' };
+      }) as any;
+
+      const json: any = await init(undefined, {
+        fetchWorkspaces: fetchWorkspaces(workspace, otherWorkspace),
+        promptFn,
+        isTTY: true,
+        isCi: false,
+      });
+
+      expect(promptFn).toHaveBeenCalledTimes(2);
+      expect(json.schema.id).toBe('schema-2');
+      expect(json.libraryInterfaceFileFilter).toBe('events-only');
+    });
+
+    it("writes only the explicit key when the user chooses 'all'", async () => {
+      const promptFn = jest.fn(async () => ({
+        libraryInterfaceFileFilter: 'all',
+      })) as any;
+
+      const json: any = await init(undefined, {
+        fetchWorkspaces: fetchWorkspaces(workspace),
+        promptFn,
+        isTTY: true,
+        isCi: false,
+      });
+
+      expect(json).toEqual({
+        avo: json.avo,
+        schema: { id: 'schema-1', name: 'Test Workspace' },
+        branch: { id: 'master', name: 'main' },
+        libraryInterfaceFileFilter: 'all',
+      });
+    });
+
+    it('never reads stdin without a TTY, and omits the key entirely', async () => {
+      const promptFn = jest.fn();
+      const reportInfo = jest.fn();
+      process.stdin.isTTY = false;
+
+      const json: any = await init(undefined, {
+        fetchWorkspaces: fetchWorkspaces(workspace),
+        promptFn: promptFn as any,
+        reportInfo,
+      });
+
+      expect(promptFn).not.toHaveBeenCalled();
+      expect('libraryInterfaceFileFilter' in json).toBe(false);
+      expect(reportInfo).toHaveBeenCalledTimes(1);
+    });
+
+    it('never reads stdin when CI is set, using the existing invokedByCi model', async () => {
+      const promptFn = jest.fn();
+      const reportInfo = jest.fn();
+      process.env.CI = 'true';
+      process.stdin.isTTY = true;
+
+      const json: any = await init(undefined, {
+        fetchWorkspaces: fetchWorkspaces(workspace),
+        promptFn: promptFn as any,
+        reportInfo,
+      });
+
+      expect(promptFn).not.toHaveBeenCalled();
+      expect('libraryInterfaceFileFilter' in json).toBe(false);
+      expect(reportInfo).toHaveBeenCalledTimes(1);
+    });
+
+    it('pre-answers from --libraryInterfaceFileFilter without prompting', async () => {
+      const promptFn = jest.fn();
+      process.stdin.isTTY = true;
+
+      const json: any = await init('events-only', {
+        fetchWorkspaces: fetchWorkspaces(workspace),
+        promptFn: promptFn as any,
+      });
+
+      expect(promptFn).not.toHaveBeenCalled();
+      expect(json.libraryInterfaceFileFilter).toBe('events-only');
+    });
+  });
+
+  describe('implicit init from the pull path', () => {
+    let tempDir: string;
+    let previousCwd: string;
+
+    beforeEach(() => {
+      previousCwd = process.cwd();
+      tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'avo-test-'));
+      process.chdir(tempDir);
+    });
+
+    afterEach(() => {
+      process.chdir(previousCwd);
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    });
+
+    it('completes in CI without prompting when avo.json is missing', async () => {
+      const promptFn = jest.fn();
+      process.env.CI = 'true';
+      process.stdin.isTTY = true;
+
+      const json: any = await loadAvoJsonOrInit({
+        argv: { token: 'test-token' },
+        skipInit: false,
+        skipPullMaster: false,
+        initFn: () =>
+          init(undefined, {
+            fetchWorkspaces: fetchWorkspaces(workspace),
+            promptFn: promptFn as any,
+          }),
+      });
+
+      expect(promptFn).not.toHaveBeenCalled();
+      expect(json.schema.id).toBe('schema-1');
+      expect('libraryInterfaceFileFilter' in json).toBe(false);
     });
   });
 });

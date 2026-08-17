@@ -720,14 +720,108 @@ type ApiWorkspacesResult = {
   workspaces: [{ lastUsedAt: number; name: string; id: string }];
 };
 
-function init(): Promise<AvoJson> {
+export function buildLibraryInterfaceFileFilterInfoLine(): string {
+  return `Set ${bold('libraryInterfaceFileFilter')} in ${file(
+    'avo.json',
+  )} to choose which files ${cmd(
+    'avo pull',
+  )} generates for sources using a library interface: ${LIBRARY_INTERFACE_FILE_FILTER_VALUES.join(
+    ', ',
+  )} (defaults to all)`;
+}
+
+export function buildLibraryInterfaceFileFilterPrompt() {
+  return {
+    type: 'list',
+    name: 'libraryInterfaceFileFilter',
+    message:
+      "Which files should 'avo pull' generate in this folder?\n" +
+      '(Only applies to sources using a library interface — every other source is unaffected)',
+    default: 'all',
+    choices: [
+      {
+        value: 'interface-only',
+        name: 'interface-only — only the shared library interface file',
+      },
+      {
+        value: 'events-only',
+        name: 'events-only — only the event files; the library interface is consumed from elsewhere',
+      },
+      {
+        value: 'all',
+        name: 'all — the library interface and the event files (default, unchanged behaviour)',
+      },
+    ],
+  };
+}
+
+type InitPromptAnswers = {
+  schema?: { id: string; name: string };
+  libraryInterfaceFileFilter?: LibraryInterfaceFileFilter;
+};
+
+type InitDeps = {
+  fetchWorkspaces?: () => Promise<ApiWorkspacesResult>;
+  promptFn?: (questions: unknown) => Promise<InitPromptAnswers>;
+  isTTY?: boolean;
+  isCi?: boolean;
+  reportInfo?: (text: string) => void;
+};
+
+// Asked only where a human can answer: init() is reached implicitly from pull,
+// checkout and merge, so prompting without a terminal would turn a working
+// scripted pull into one that blocks forever.
+export function resolveInitLibraryInterfaceFileFilter({
+  preAnswer,
+  isTTY = Boolean(process.stdin.isTTY),
+  isCi = invokedByCi(),
+  promptFn = inquirer.prompt,
+  reportInfo = report.info,
+}: {
+  preAnswer?: LibraryInterfaceFileFilter;
+} & InitDeps = {}): Promise<LibraryInterfaceFileFilter | undefined> {
+  if (preAnswer !== undefined) {
+    return Promise.resolve(parseLibraryInterfaceFileFilter(preAnswer));
+  }
+
+  if (!isTTY || isCi) {
+    reportInfo(buildLibraryInterfaceFileFilterInfoLine());
+    return Promise.resolve(undefined);
+  }
+
+  return promptFn([buildLibraryInterfaceFileFilterPrompt()]).then(
+    (answer) => answer.libraryInterfaceFileFilter,
+  );
+}
+
+export function init(
+  libraryInterfaceFileFilterPreAnswer?: LibraryInterfaceFileFilter,
+  deps: InitDeps = {},
+): Promise<AvoJson> {
+  const promptFn = deps.promptFn ?? inquirer.prompt;
+  const fetchWorkspaces =
+    deps.fetchWorkspaces ??
+    (() =>
+      api.request('GET', '/c/v1/workspaces', {
+        origin: api.apiOrigin,
+        auth: true,
+      }));
+
+  // Placed inside makeAvoJson so it fires on BOTH return paths — the
+  // single-workspace branch never reaches the workspace picker.
   const makeAvoJson = (schema: {
     id: string;
     name: string;
   }): Promise<AvoJson> => {
     report.success(`Initialized for workspace ${cyan(schema.name)}`);
 
-    return Promise.resolve({
+    return resolveInitLibraryInterfaceFileFilter({
+      preAnswer: libraryInterfaceFileFilterPreAnswer,
+      isTTY: deps.isTTY,
+      isCi: deps.isCi,
+      promptFn,
+      reportInfo: deps.reportInfo,
+    }).then((libraryInterfaceFileFilter) => ({
       avo: {
         version: semver.major(pkg.version),
       },
@@ -739,48 +833,42 @@ function init(): Promise<AvoJson> {
         id: 'master',
         name: 'main',
       },
-    });
+      ...(libraryInterfaceFileFilter === undefined
+        ? {}
+        : { libraryInterfaceFileFilter }),
+    }));
   };
 
   wait('Initializing');
 
-  return api
-    .request('GET', '/c/v1/workspaces', {
-      origin: api.apiOrigin,
-      auth: true,
-    })
-    .then(({ workspaces }: ApiWorkspacesResult) => {
-      cancelWait();
-      const schemas = [...workspaces].sort(
-        (a, b) => a.lastUsedAt - b.lastUsedAt,
+  return fetchWorkspaces().then(({ workspaces }: ApiWorkspacesResult) => {
+    cancelWait();
+    const schemas = [...workspaces].sort((a, b) => a.lastUsedAt - b.lastUsedAt);
+    if (schemas.length > 1) {
+      const choices = schemas.map((schema) => ({
+        value: schema,
+        name: schema.name,
+      }));
+      return promptFn([
+        {
+          type: 'list',
+          name: 'schema',
+          message: 'Select a workspace to initialize',
+          choices,
+        },
+      ]).then((answer) => makeAvoJson(answer.schema));
+    }
+    if (schemas.length === 0) {
+      throw new AvoError(
+        `No workspaces to initialize. Go to ${link(
+          'wwww.avo.app',
+        )} to create one`,
       );
-      if (schemas.length > 1) {
-        const choices = schemas.map((schema) => ({
-          value: schema,
-          name: schema.name,
-        }));
-        return inquirer
-          .prompt([
-            {
-              type: 'list',
-              name: 'schema',
-              message: 'Select a workspace to initialize',
-              choices,
-            },
-          ])
-          .then((answer) => makeAvoJson(answer.schema));
-      }
-      if (schemas.length === 0) {
-        throw new AvoError(
-          `No workspaces to initialize. Go to ${link(
-            'wwww.avo.app',
-          )} to create one`,
-        );
-      } else {
-        const schema = schemas[0];
-        return makeAvoJson(schema);
-      }
-    });
+    } else {
+      const schema = schemas[0];
+      return makeAvoJson(schema);
+    }
+  });
 }
 
 export function validateAvoJson(json: AvoJson): Promise<AvoJson> {
@@ -1086,6 +1174,7 @@ export function loadAvoJsonOrInit({
   argv,
   skipPullMaster,
   skipInit,
+  initFn = init,
 }): Promise<AvoJson> {
   return pify(fs.readFile)('avo.json', 'utf8')
     .then((avoFile) => {
@@ -1112,7 +1201,7 @@ export function loadAvoJsonOrInit({
 
       if (error.code === 'ENOENT') {
         report.info('Avo not initialized');
-        return requireAuth(argv, init);
+        return requireAuth(argv, initFn);
       }
 
       throw error;
@@ -2313,7 +2402,21 @@ if (isMainModule) {
       .command({
         command: 'init',
         describe: 'Initialize an Avo workspace in the current folder',
+        builder: (initYargs) =>
+          initYargs.option('libraryInterfaceFileFilter', {
+            describe:
+              'Which files avo pull should generate for sources using a library interface. Skips the prompt and writes the value to avo.json',
+            choices: LIBRARY_INTERFACE_FILE_FILTER_VALUES,
+            default: undefined,
+            type: 'string',
+          }),
         handler: (argv) => {
+          const libraryInterfaceFileFilterPreAnswer =
+            argv.libraryInterfaceFileFilter === undefined
+              ? undefined
+              : parseLibraryInterfaceFileFilter(
+                  argv.libraryInterfaceFileFilter,
+                );
           loadAvoJsonOrInit({ argv, skipPullMaster: false, skipInit: true })
             .then((json) => {
               if (json) {
@@ -2333,6 +2436,11 @@ if (isMainModule) {
                     json.schema.name,
                   )} (${file('avo.json')} exists)`,
                 );
+                // avo init early-returns in every already-initialised repo, so the
+                // prompt is unreachable there — name the setting instead.
+                if (json.libraryInterfaceFileFilter === undefined) {
+                  report.info(buildLibraryInterfaceFileFilterInfoLine());
+                }
                 return Promise.resolve();
               }
 
@@ -2348,7 +2456,7 @@ if (isMainModule) {
                 forceFeatures: undefined,
               });
               return requireAuth(argv as any, () =>
-                init()
+                init(libraryInterfaceFileFilterPreAnswer)
                   .then(writeAvoJson)
                   .then(() => {
                     report.info(
