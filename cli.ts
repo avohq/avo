@@ -1030,9 +1030,11 @@ export function findUnresolvableAvoJsonConflict(
     return "Could not automatically resolve merge conflicts in avo.json. Resolve merge conflicts in avo.json before running 'avo pull' again.";
   }
 
+  // sources is optional on AvoJson: an initialised repo that has not added a source
+  // yet has no key at all, and mapping over it directly throws instead of resolving.
   if (
-    JSON.stringify(head.sources.map((s) => s.id)) !==
-    JSON.stringify(incoming.sources.map((s) => s.id))
+    JSON.stringify((head.sources ?? []).map((s) => s.id)) !==
+    JSON.stringify((incoming.sources ?? []).map((s) => s.id))
   ) {
     return "Could not automatically resolve merge conflicts in avo.json. Resolve merge conflicts in sources list in avo.json before running 'avo pull' again.";
   }
@@ -1261,9 +1263,12 @@ export function collectStaleSuppressedFiles(
 export function buildStaleSuppressedFileWarning(
   suppressedPath: string,
 ): string {
+  // Deliberately mode-neutral: under events-only the suppressed path is the shared
+  // interface, but under interface-only it is an app/event file. Naming the wrong
+  // one would talk a user into deleting the wrong file.
   return `[avo] Warning: ${file(
     suppressedPath,
-  )} is no longer generated here and will shadow the shared interface; remove it.`;
+  )} is no longer generated here because of the current libraryInterfaceFileFilter. It is now stale and may shadow the generated code; remove it.`;
 }
 
 export function codegen(
@@ -2493,8 +2498,16 @@ if (isMainModule) {
                   )} (${file('avo.json')} exists)`,
                 );
                 // avo init early-returns in every already-initialised repo, so the
-                // prompt is unreachable there — name the setting instead.
-                if (json.libraryInterfaceFileFilter === undefined) {
+                // prompt is unreachable there. Say so explicitly when a value was
+                // passed — silently discarding it while the flag's help text says it
+                // gets written to avo.json is how a user ends up believing it applied.
+                if (libraryInterfaceFileFilterPreAnswer !== undefined) {
+                  report.warn(
+                    `Ignoring --libraryInterfaceFileFilter because ${file(
+                      'avo.json',
+                    )} already exists. Edit ${file('avo.json')} to change it.`,
+                  );
+                } else if (json.libraryInterfaceFileFilter === undefined) {
                   report.info(buildLibraryInterfaceFileFilterInfoLine());
                 }
                 return Promise.resolve();

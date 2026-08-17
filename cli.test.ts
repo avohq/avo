@@ -1,6 +1,4 @@
-// Set test mode before importing cli to prevent yargs execution
-process.env.AVO_TEST_MODE = 'true';
-
+// AVO_TEST_MODE is set by jest.setup.js, which runs before this file is imported.
 import fs from 'fs';
 import path from 'path';
 import {
@@ -41,6 +39,24 @@ import {
   collectStaleSuppressedFiles,
   buildStaleSuppressedFileWarning,
 } from './cli.js';
+
+// Each of these suites runs codegen against the real filesystem, so they need an
+// isolated cwd. Declared once rather than repeated per describe block.
+const useTempCwd = (): void => {
+  let tempDir: string;
+  let previousCwd: string;
+
+  beforeEach(() => {
+    previousCwd = process.cwd();
+    tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'avo-test-'));
+    process.chdir(tempDir);
+  });
+
+  afterEach(() => {
+    process.chdir(previousCwd);
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  });
+};
 
 describe('File-per-event cleanup helper functions', () => {
   let tempDir: string;
@@ -455,6 +471,23 @@ describe('avo.json merge conflict resolution', () => {
       expect(findUnresolvableAvoJsonConflict(head, incoming)).toBeNull();
     });
 
+    // sources is optional: an initialised repo that has not added a source yet has
+    // no key at all, and mapping over it directly threw a TypeError.
+    it('resolves when neither side has a sources key', () => {
+      const head: any = {
+        avo: { version: 2 },
+        schema: { id: 'schema-1', name: 'Test' },
+        branch: { id: 'master', name: 'main' },
+      };
+      const incoming: any = {
+        avo: { version: 2 },
+        schema: { id: 'schema-1', name: 'Test' },
+        branch: { id: 'feature', name: 'feature' },
+      };
+
+      expect(findUnresolvableAvoJsonConflict(head, incoming)).toBeNull();
+    });
+
     it('bails out on a mismatched avo version', () => {
       const [head, incoming] = parseConflictSides(conflictedAvoJson);
       incoming.avo = { version: 2 };
@@ -648,19 +681,7 @@ describe('libraryInterfaceFileFilter', () => {
   });
 
   describe('validateAvoJson rejects a malformed persisted value', () => {
-    let tempDir: string;
-    let previousCwd: string;
-
-    beforeEach(() => {
-      previousCwd = process.cwd();
-      tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'avo-test-'));
-      process.chdir(tempDir);
-    });
-
-    afterEach(() => {
-      process.chdir(previousCwd);
-      fs.rmSync(tempDir, { recursive: true, force: true });
-    });
+    useTempCwd();
 
     // validateAvoJson throws synchronously, as it already does for an outdated CLI;
     // every production call site sits inside a .then, so the throw surfaces as a
@@ -721,19 +742,7 @@ describe('libraryInterfaceFileFilter', () => {
   });
 
   describe('persistence across write paths', () => {
-    let tempDir: string;
-    let previousCwd: string;
-
-    beforeEach(() => {
-      previousCwd = process.cwd();
-      tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'avo-test-'));
-      process.chdir(tempDir);
-    });
-
-    afterEach(() => {
-      process.chdir(previousCwd);
-      fs.rmSync(tempDir, { recursive: true, force: true });
-    });
+    useTempCwd();
 
     it('applyBranchToAvoJson keeps the top-level setting across a checkout', () => {
       const json: any = baseJson();
@@ -791,19 +800,7 @@ describe('libraryInterfaceFileFilter', () => {
   });
 
   describe('applyPullResult', () => {
-    let tempDir: string;
-    let previousCwd: string;
-
-    beforeEach(() => {
-      previousCwd = process.cwd();
-      tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'avo-test-'));
-      process.chdir(tempDir);
-    });
-
-    afterEach(() => {
-      process.chdir(previousCwd);
-      fs.rmSync(tempDir, { recursive: true, force: true });
-    });
+    useTempCwd();
 
     it('runs codegen when the response is ok', () => {
       const json: any = baseJson();
@@ -979,7 +976,7 @@ describe('avo init and libraryInterfaceFileFilter', () => {
   });
 
   describe('init()', () => {
-    it('prompts on the single-workspace branch, which prompts zero times today', async () => {
+    it('prompts for the filter on the single-workspace branch, which skips the workspace picker', async () => {
       const promptFn = jest.fn(async () => ({
         libraryInterfaceFileFilter: 'interface-only',
       })) as any;
@@ -1085,19 +1082,7 @@ describe('avo init and libraryInterfaceFileFilter', () => {
   });
 
   describe('implicit init from the pull path', () => {
-    let tempDir: string;
-    let previousCwd: string;
-
-    beforeEach(() => {
-      previousCwd = process.cwd();
-      tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'avo-test-'));
-      process.chdir(tempDir);
-    });
-
-    afterEach(() => {
-      process.chdir(previousCwd);
-      fs.rmSync(tempDir, { recursive: true, force: true });
-    });
+    useTempCwd();
 
     it('completes in CI without prompting when avo.json is missing', async () => {
       const promptFn = jest.fn();
@@ -1148,32 +1133,37 @@ describe('stale files from a previous filter', () => {
   });
 
   describe('buildStaleSuppressedFileWarning', () => {
-    it('names the file and says it will shadow the shared interface', () => {
+    it('names the file without claiming which side of the split it is', () => {
       const warning = buildStaleSuppressedFileWarning('src/AvoLibrary.ts');
 
       expect(warning).toContain('[avo] Warning:');
       expect(warning).toContain('src/AvoLibrary.ts');
-      expect(warning).toContain('shadow');
       expect(warning).toMatch(/no longer generated/i);
+      expect(warning).toContain('libraryInterfaceFileFilter');
+    });
+
+    // Under interface-only the suppressed files are app/event files, not the
+    // interface — wording that names the interface would send a user to delete
+    // the wrong file.
+    it('uses the same wording for an app-side file', () => {
+      const warning = buildStaleSuppressedFileWarning('src/AvoEvents/clicked.ts');
+
+      expect(warning).toContain('src/AvoEvents/clicked.ts');
+      expect(warning).not.toContain('shared interface');
     });
   });
 
   describe('codegen', () => {
-    let tempDir: string;
-    let previousCwd: string;
+    useTempCwd();
+
     let logSpy: any;
 
     beforeEach(() => {
-      previousCwd = process.cwd();
-      tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'avo-test-'));
-      process.chdir(tempDir);
       logSpy = jest.spyOn(console, 'log').mockImplementation(() => undefined);
     });
 
     afterEach(() => {
       logSpy.mockRestore();
-      process.chdir(previousCwd);
-      fs.rmSync(tempDir, { recursive: true, force: true });
     });
 
     const staleWarnings = () =>
