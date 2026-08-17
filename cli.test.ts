@@ -3,7 +3,14 @@ process.env.AVO_TEST_MODE = 'true';
 
 import fs from 'fs';
 import path from 'path';
-import { describe, it, expect, beforeEach, afterEach } from '@jest/globals';
+import {
+  describe,
+  it,
+  expect,
+  beforeEach,
+  afterEach,
+  jest,
+} from '@jest/globals';
 import os from 'os';
 import {
   getEventsDirectoryPath,
@@ -17,6 +24,16 @@ import {
   extractConflictingFiles,
   buildResolvedAvoJson,
   findUnresolvableAvoJsonConflict,
+  LIBRARY_INTERFACE_FILE_FILTER_VALUES,
+  parseLibraryInterfaceFileFilter,
+  resolveLibraryInterfaceFileFilter,
+  buildPullRequestBody,
+  validateAvoJson,
+  loadAvoJson,
+  loadAvoJsonOrInit,
+  applyBranchToAvoJson,
+  codegen,
+  applyPullResult,
 } from './cli.js';
 
 describe('File-per-event cleanup helper functions', () => {
@@ -130,7 +147,9 @@ describe('File-per-event cleanup helper functions', () => {
       cleanupObsoleteEventFiles(eventsDir, oldEvents, newEvents, extension);
 
       // Verify deleted file doesn't exist
-      expect(fs.existsSync(path.join(eventsDir, 'eventDeleted.ts'))).toBe(false);
+      expect(fs.existsSync(path.join(eventsDir, 'eventDeleted.ts'))).toBe(
+        false,
+      );
       // Verify remaining files still exist
       expect(fs.existsSync(path.join(eventsDir, 'eventClicked.ts'))).toBe(true);
       expect(fs.existsSync(path.join(eventsDir, 'eventViewed.ts'))).toBe(true);
@@ -155,7 +174,9 @@ describe('File-per-event cleanup helper functions', () => {
       cleanupObsoleteEventFiles(eventsDir, oldEvents, newEvents, extension);
 
       // Verify deleted file doesn't exist
-      expect(fs.existsSync(path.join(eventsDir, 'eventDeleted.kt'))).toBe(false);
+      expect(fs.existsSync(path.join(eventsDir, 'eventDeleted.kt'))).toBe(
+        false,
+      );
       // Verify remaining file still exists
       expect(fs.existsSync(path.join(eventsDir, 'eventClicked.kt'))).toBe(true);
     });
@@ -179,9 +200,13 @@ describe('File-per-event cleanup helper functions', () => {
       cleanupObsoleteEventFiles(eventsDir, oldEvents, newEvents, extension);
 
       // Verify deleted file doesn't exist
-      expect(fs.existsSync(path.join(eventsDir, 'eventDeleted.swift'))).toBe(false);
+      expect(fs.existsSync(path.join(eventsDir, 'eventDeleted.swift'))).toBe(
+        false,
+      );
       // Verify remaining file still exists
-      expect(fs.existsSync(path.join(eventsDir, 'eventClicked.swift'))).toBe(true);
+      expect(fs.existsSync(path.join(eventsDir, 'eventClicked.swift'))).toBe(
+        true,
+      );
     });
 
     it('should not delete files for events in both lists', () => {
@@ -249,7 +274,9 @@ describe('File-per-event cleanup helper functions', () => {
       cleanupObsoleteEventFiles(eventsDir, oldEvents, newEvents, extension);
 
       // Verify all files deleted
-      expect(fs.existsSync(path.join(eventsDir, 'eventClicked.ts'))).toBe(false);
+      expect(fs.existsSync(path.join(eventsDir, 'eventClicked.ts'))).toBe(
+        false,
+      );
       expect(fs.existsSync(path.join(eventsDir, 'eventViewed.ts'))).toBe(false);
     });
   });
@@ -284,7 +311,9 @@ describe('File-per-event cleanup helper functions', () => {
       cleanupObsoleteEventFiles(eventsDir, oldEvents, newEvents, extension);
 
       // Verify cleanup results
-      expect(fs.existsSync(path.join(eventsDir, 'eventDeleted.ts'))).toBe(false);
+      expect(fs.existsSync(path.join(eventsDir, 'eventDeleted.ts'))).toBe(
+        false,
+      );
       expect(fs.existsSync(path.join(eventsDir, 'eventClicked.ts'))).toBe(true);
       expect(fs.existsSync(path.join(eventsDir, 'eventViewed.ts'))).toBe(true);
     });
@@ -316,7 +345,7 @@ describe('Prompt message helpers', () => {
     expect(result).toContain('src/analytics');
   });
 
-  it("buildFilenameMessage mentions avo pull regeneration", () => {
+  it('buildFilenameMessage mentions avo pull regeneration', () => {
     const result = buildFilenameMessage();
     expect(result).toContain("This file is regenerated on every 'avo pull'");
   });
@@ -391,7 +420,10 @@ describe('avo.json merge conflict resolution', () => {
       const resolved = buildResolvedAvoJson(head) as Record<string, any>;
 
       expect(resolved.avo).toEqual({ version: 3 });
-      expect(resolved.schema).toEqual({ id: 'schema-1', name: 'Test Workspace' });
+      expect(resolved.schema).toEqual({
+        id: 'schema-1',
+        name: 'Test Workspace',
+      });
       expect(resolved.branch).toEqual({
         id: 'branch-head',
         name: 'head-branch',
@@ -442,6 +474,369 @@ describe('avo.json merge conflict resolution', () => {
       expect(findUnresolvableAvoJsonConflict(head, incoming)).toBe(
         "Could not automatically resolve merge conflicts in avo.json. Resolve merge conflicts in sources list in avo.json before running 'avo pull' again.",
       );
+    });
+  });
+});
+
+describe('libraryInterfaceFileFilter', () => {
+  const baseJson = () => ({
+    avo: { version: 3 },
+    schema: { id: 'schema-1', name: 'Test Workspace' },
+    branch: { id: 'master', name: 'main' },
+    sources: [
+      {
+        id: 'source-1',
+        name: 'Web',
+        path: 'src/Avo.ts',
+        interfacePath: 'src/Avo.ts',
+        actionId: 'action-1',
+        branchId: 'master',
+        updatedAt: '2026-08-01T00:00:00.000Z',
+      },
+      {
+        id: 'source-2',
+        name: 'iOS',
+        path: 'Sources/Avo.swift',
+        interfacePath: 'Sources/AvoLibraryInterface.swift',
+        actionId: 'action-2',
+        branchId: 'master',
+        updatedAt: '2026-08-01T00:00:00.000Z',
+      },
+    ],
+  });
+
+  describe('parseLibraryInterfaceFileFilter', () => {
+    it('accepts every supported value', () => {
+      expect(LIBRARY_INTERFACE_FILE_FILTER_VALUES).toEqual([
+        'interface-only',
+        'events-only',
+        'all',
+      ]);
+      LIBRARY_INTERFACE_FILE_FILTER_VALUES.forEach((value) => {
+        expect(parseLibraryInterfaceFileFilter(value)).toBe(value);
+      });
+    });
+
+    it('rejects an unsupported value with the documented message', () => {
+      expect(() => parseLibraryInterfaceFileFilter('interfaceonly')).toThrow(
+        /must be one of interface-only, events-only, all/,
+      );
+    });
+  });
+
+  describe('resolveLibraryInterfaceFileFilter', () => {
+    it('prefers the per-run flag', () => {
+      expect(
+        resolveLibraryInterfaceFileFilter({
+          flag: 'interface-only',
+          source: { libraryInterfaceFileFilter: 'events-only' },
+          json: { libraryInterfaceFileFilter: 'all' },
+        }),
+      ).toBe('interface-only');
+    });
+
+    it('falls back to the per-source override', () => {
+      expect(
+        resolveLibraryInterfaceFileFilter({
+          flag: undefined,
+          source: { libraryInterfaceFileFilter: 'events-only' },
+          json: { libraryInterfaceFileFilter: 'all' },
+        }),
+      ).toBe('events-only');
+    });
+
+    it('falls back to the top-level value', () => {
+      expect(
+        resolveLibraryInterfaceFileFilter({
+          flag: undefined,
+          source: {},
+          json: { libraryInterfaceFileFilter: 'interface-only' },
+        }),
+      ).toBe('interface-only');
+    });
+
+    it("defaults to 'all'", () => {
+      expect(
+        resolveLibraryInterfaceFileFilter({
+          flag: undefined,
+          source: {},
+          json: {},
+        }),
+      ).toBe('all');
+    });
+  });
+
+  describe('buildPullRequestBody', () => {
+    it('resolves each source independently in one request', () => {
+      const json: any = baseJson();
+      json.libraryInterfaceFileFilter = 'events-only';
+      json.sources[0].libraryInterfaceFileFilter = 'interface-only';
+
+      const body = buildPullRequestBody(json, json.sources);
+
+      expect(body.sources[0].libraryInterfaceFileFilter).toBe('interface-only');
+      expect(body.sources[1].libraryInterfaceFileFilter).toBe('events-only');
+    });
+
+    it('sends exactly the four per-source fields', () => {
+      const json: any = baseJson();
+
+      const body = buildPullRequestBody(json, json.sources);
+
+      expect(Object.keys(body.sources[0])).toEqual([
+        'id',
+        'path',
+        'interfacePath',
+        'libraryInterfaceFileFilter',
+      ]);
+      expect(body.sources[0]).toEqual({
+        id: 'source-1',
+        path: 'src/Avo.ts',
+        interfacePath: 'src/Avo.ts',
+        libraryInterfaceFileFilter: 'all',
+      });
+    });
+
+    it('leaves the top-level body fields unchanged', () => {
+      const json: any = baseJson();
+      json.force = true;
+      json.forceFeatures = 'a,b';
+
+      const body = buildPullRequestBody(json, json.sources);
+
+      expect(Object.keys(body)).toEqual([
+        'schemaId',
+        'branchId',
+        'sources',
+        'force',
+        'forceFeatures',
+      ]);
+      expect(body.schemaId).toBe('schema-1');
+      expect(body.branchId).toBe('master');
+      expect(body.force).toBe(true);
+      expect(body.forceFeatures).toBe('a,b');
+    });
+
+    it('applies the per-run override to every source in the run', () => {
+      const json: any = baseJson();
+      json.libraryInterfaceFileFilter = 'events-only';
+      json.sources[0].libraryInterfaceFileFilter = 'all';
+
+      const body = buildPullRequestBody(json, json.sources, 'interface-only');
+
+      expect(
+        body.sources.map((s: any) => s.libraryInterfaceFileFilter),
+      ).toEqual(['interface-only', 'interface-only']);
+    });
+
+    it("resolves from avo.json when no override is passed, as the 'avo conflict' path does", () => {
+      const json: any = baseJson();
+      json.libraryInterfaceFileFilter = 'events-only';
+
+      const body = buildPullRequestBody(json, json.sources);
+
+      expect(
+        body.sources.map((s: any) => s.libraryInterfaceFileFilter),
+      ).toEqual(['events-only', 'events-only']);
+    });
+  });
+
+  describe('validateAvoJson rejects a malformed persisted value', () => {
+    let tempDir: string;
+    let previousCwd: string;
+
+    beforeEach(() => {
+      previousCwd = process.cwd();
+      tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'avo-test-'));
+      process.chdir(tempDir);
+    });
+
+    afterEach(() => {
+      process.chdir(previousCwd);
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    });
+
+    // validateAvoJson throws synchronously, as it already does for an outdated CLI;
+    // every production call site sits inside a .then, so the throw surfaces as a
+    // rejection there — asserted by the loadAvoJson* tests below.
+    it('rejects a malformed top-level value', () => {
+      const json: any = baseJson();
+      json.libraryInterfaceFileFilter = 'interfaceonly';
+
+      expect(() => validateAvoJson(json)).toThrow(
+        /must be one of interface-only, events-only, all/,
+      );
+    });
+
+    it('rejects a malformed per-source value', () => {
+      const json: any = baseJson();
+      json.sources[1].libraryInterfaceFileFilter = 'eventsonly';
+
+      expect(() => validateAvoJson(json)).toThrow(
+        /must be one of interface-only, events-only, all/,
+      );
+    });
+
+    it('surfaces on a non-pull command path (loadAvoJson)', async () => {
+      const json: any = baseJson();
+      json.libraryInterfaceFileFilter = 'interfaceonly';
+      fs.writeFileSync('avo.json', JSON.stringify(json, null, 2));
+
+      await expect(loadAvoJson()).rejects.toThrow(
+        /must be one of interface-only, events-only, all/,
+      );
+    });
+
+    it('surfaces on the pull command path (loadAvoJsonOrInit)', async () => {
+      const json: any = baseJson();
+      json.libraryInterfaceFileFilter = 'interfaceonly';
+      fs.writeFileSync('avo.json', JSON.stringify(json, null, 2));
+
+      await expect(
+        loadAvoJsonOrInit({
+          argv: {},
+          skipInit: false,
+          skipPullMaster: false,
+        }),
+      ).rejects.toThrow(/must be one of interface-only, events-only, all/);
+    });
+
+    it('accepts a well-formed value on both levels', async () => {
+      const json: any = baseJson();
+      json.libraryInterfaceFileFilter = 'events-only';
+      json.sources[0].libraryInterfaceFileFilter = 'interface-only';
+
+      const validated: any = await validateAvoJson(json);
+      expect(validated.libraryInterfaceFileFilter).toBe('events-only');
+      expect(validated.sources[0].libraryInterfaceFileFilter).toBe(
+        'interface-only',
+      );
+    });
+  });
+
+  describe('persistence across write paths', () => {
+    let tempDir: string;
+    let previousCwd: string;
+
+    beforeEach(() => {
+      previousCwd = process.cwd();
+      tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'avo-test-'));
+      process.chdir(tempDir);
+    });
+
+    afterEach(() => {
+      process.chdir(previousCwd);
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    });
+
+    it('applyBranchToAvoJson keeps the top-level setting across a checkout', () => {
+      const json: any = baseJson();
+      json.libraryInterfaceFileFilter = 'interface-only';
+      json.teamNote = 'shared interface repo';
+
+      const next: any = applyBranchToAvoJson(json, {
+        id: 'branch-1',
+        name: 'feature',
+      });
+
+      expect(next.branch).toEqual({ id: 'branch-1', name: 'feature' });
+      expect(next.libraryInterfaceFileFilter).toBe('interface-only');
+      expect(next.teamNote).toBe('shared interface repo');
+    });
+
+    it('codegen preserves per-source state and never writes the per-run flag back', async () => {
+      const json: any = baseJson();
+      json.libraryInterfaceFileFilter = 'events-only';
+      json.sources[0].libraryInterfaceFileFilter = 'events-only';
+      json.sources[0].teamOwner = 'growth';
+      json.sources.pop();
+
+      // The override travels as a pull() argument, so it is absent from the json
+      // codegen deep-copies and persists.
+      const body = buildPullRequestBody(json, json.sources, 'interface-only');
+      expect(body.sources[0].libraryInterfaceFileFilter).toBe('interface-only');
+
+      await codegen(json, {
+        schema: json.schema,
+        sources: [
+          {
+            id: 'source-1',
+            actionId: 'action-2',
+            name: 'Web',
+            branchId: 'master',
+            updatedAt: '2026-08-02T00:00:00.000Z',
+            code: [{ path: 'src/Avo.ts', content: '// generated' }],
+          },
+        ],
+        warnings: [],
+        success: [],
+        errors: '',
+      });
+
+      const written = JSON.parse(fs.readFileSync('avo.json', 'utf8'));
+
+      expect(written.libraryInterfaceFileFilter).toBe('events-only');
+      expect(written.sources[0].libraryInterfaceFileFilter).toBe('events-only');
+      // Unknown per-source state survives too, locking the `...source` spread
+      // rather than this one field.
+      expect(written.sources[0].teamOwner).toBe('growth');
+      expect(JSON.stringify(written)).not.toContain('interface-only');
+    });
+  });
+
+  describe('applyPullResult', () => {
+    let tempDir: string;
+    let previousCwd: string;
+
+    beforeEach(() => {
+      previousCwd = process.cwd();
+      tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'avo-test-'));
+      process.chdir(tempDir);
+    });
+
+    afterEach(() => {
+      process.chdir(previousCwd);
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    });
+
+    it('runs codegen when the response is ok', () => {
+      const json: any = baseJson();
+      const runCodegen = jest.fn();
+      const retry = jest.fn();
+      const result: any = { ok: true, sources: [] };
+
+      applyPullResult('Web', json, result, 'events-only', {
+        runCodegen,
+        retry,
+      });
+
+      expect(runCodegen).toHaveBeenCalledWith(json, result);
+      expect(retry).not.toHaveBeenCalled();
+    });
+
+    it('writes nothing and forwards the override to the post-checkout retry when the branch is closed', () => {
+      const json: any = baseJson();
+      json.libraryInterfaceFileFilter = 'events-only';
+      fs.writeFileSync('avo.json', JSON.stringify(json, null, 2));
+      const before = fs.readFileSync('avo.json', 'utf8');
+      const retry = jest.fn();
+
+      applyPullResult(
+        'Web',
+        json,
+        {
+          ok: false,
+          branchName: 'feature',
+          reason: 'closed',
+          closedAt: new Date().toISOString(),
+        } as any,
+        'interface-only',
+        { retry },
+      );
+
+      expect(retry).toHaveBeenCalledWith('Web', json, 'interface-only');
+      expect(fs.readFileSync('avo.json', 'utf8')).toBe(before);
+      expect(fs.readdirSync('.')).toEqual(['avo.json']);
     });
   });
 });

@@ -466,6 +466,15 @@ type Schema = {
   id: string;
   name: string;
 };
+export const LIBRARY_INTERFACE_FILE_FILTER_VALUES = [
+  'interface-only',
+  'events-only',
+  'all',
+] as const;
+
+type LibraryInterfaceFileFilter =
+  (typeof LIBRARY_INTERFACE_FILE_FILTER_VALUES)[number];
+
 type Source = {
   id: string;
   name: string;
@@ -474,6 +483,7 @@ type Source = {
   branchId: string;
   updatedAt: string;
   interfacePath?: string;
+  libraryInterfaceFileFilter?: LibraryInterfaceFileFilter;
   analysis?: {
     glob: string;
     module?: string;
@@ -490,8 +500,44 @@ type AvoJson = {
   branch: Branch;
   force?: boolean;
   forceFeatures?: string;
+  libraryInterfaceFileFilter?: LibraryInterfaceFileFilter;
   sources?: Source[];
 };
+
+export function parseLibraryInterfaceFileFilter(
+  value: unknown,
+  context = '',
+): LibraryInterfaceFileFilter {
+  if (
+    LIBRARY_INTERFACE_FILE_FILTER_VALUES.includes(
+      value as LibraryInterfaceFileFilter,
+    )
+  ) {
+    return value as LibraryInterfaceFileFilter;
+  }
+  throw new AvoError(
+    `Invalid libraryInterfaceFileFilter '${value}'${context} — must be one of ${LIBRARY_INTERFACE_FILE_FILTER_VALUES.join(
+      ', ',
+    )}`,
+  );
+}
+
+export function resolveLibraryInterfaceFileFilter({
+  flag,
+  source,
+  json,
+}: {
+  flag?: LibraryInterfaceFileFilter;
+  source: Pick<Source, 'libraryInterfaceFileFilter'>;
+  json: Pick<AvoJson, 'libraryInterfaceFileFilter'>;
+}): LibraryInterfaceFileFilter {
+  return (
+    flag ??
+    source.libraryInterfaceFileFilter ??
+    json.libraryInterfaceFileFilter ??
+    'all'
+  );
+}
 
 function isLegacyAvoJson(json): boolean {
   // check if legacy avo.json or un-initialized project
@@ -737,7 +783,7 @@ function init(): Promise<AvoJson> {
     });
 }
 
-function validateAvoJson(json: AvoJson): Promise<AvoJson> {
+export function validateAvoJson(json: AvoJson): Promise<AvoJson> {
   if (avoNeedsUpdate(json)) {
     throw new AvoError('Your avo CLI is outdated, please update');
   }
@@ -745,6 +791,23 @@ function validateAvoJson(json: AvoJson): Promise<AvoJson> {
   if (isLegacyAvoJson(json)) {
     return init();
   }
+
+  // Validated here rather than on the pull path so a malformed persisted value is
+  // reported by every command that loads avo.json, not only by 'avo pull'.
+  if (json.libraryInterfaceFileFilter !== undefined) {
+    parseLibraryInterfaceFileFilter(
+      json.libraryInterfaceFileFilter,
+      ` in ${file('avo.json')}`,
+    );
+  }
+  (json.sources ?? []).forEach((source) => {
+    if (source.libraryInterfaceFileFilter !== undefined) {
+      parseLibraryInterfaceFileFilter(
+        source.libraryInterfaceFileFilter,
+        ` on source '${source.name}' in ${file('avo.json')}`,
+      );
+    }
+  });
 
   // augment the latest major version into avo.json
   return Promise.resolve({
@@ -783,6 +846,18 @@ function fetchBranches(json: AvoJson): Promise<Branch[]> {
     });
 }
 
+// Spreads the whole json so top-level state the CLI does not know about — the
+// persisted libraryInterfaceFileFilter among it — survives a branch switch.
+export function applyBranchToAvoJson(json: AvoJson, branch: Branch): AvoJson {
+  return {
+    ...json,
+    branch: {
+      id: branch.id,
+      name: branch.name,
+    },
+  };
+}
+
 function checkout(branchToCheckout: string, json: AvoJson): Promise<AvoJson> {
   return fetchBranches(json).then((branches) => {
     if (!branchToCheckout) {
@@ -810,13 +885,7 @@ function checkout(branchToCheckout: string, json: AvoJson): Promise<AvoJson> {
           }
           const { branch } = answer;
           report.success(`Switched to branch '${branch.name}'`);
-          return {
-            ...json,
-            branch: {
-              id: branch.id,
-              name: branch.name,
-            },
-          };
+          return applyBranchToAvoJson(json, branch);
         });
     }
     if (branchToCheckout === 'master') {
@@ -845,13 +914,7 @@ function checkout(branchToCheckout: string, json: AvoJson): Promise<AvoJson> {
     }
 
     report.success(`Switched to branch '${branch.name}'`);
-    return {
-      ...json,
-      branch: {
-        id: branch.id,
-        name: branch.name,
-      },
-    };
+    return applyBranchToAvoJson(json, branch);
   });
 }
 
@@ -1005,7 +1068,7 @@ function resolveAvoJsonConflicts(
   );
 }
 
-function loadAvoJson(): Promise<AvoJson> {
+export function loadAvoJson(): Promise<AvoJson> {
   return loadJsonFile('avo.json')
     .then(validateAvoJson)
     .catch((err) => {
@@ -1019,7 +1082,7 @@ function loadAvoJson(): Promise<AvoJson> {
     });
 }
 
-function loadAvoJsonOrInit({
+export function loadAvoJsonOrInit({
   argv,
   skipPullMaster,
   skipInit,
@@ -1082,7 +1145,7 @@ function mapTargetsToSources<
     );
 }
 
-function codegen(
+export function codegen(
   json: AvoJson,
   { schema, sources: targets, warnings, success, errors },
 ) {
@@ -1463,7 +1526,75 @@ type ApiPullResult = {
   schema: object;
 };
 
-function pull(sourceFilter, json: AvoJson): Promise<void> {
+export function buildPullRequestBody(
+  json: AvoJson,
+  sources: Source[],
+  libraryInterfaceFileFilterOverride?: LibraryInterfaceFileFilter,
+) {
+  return {
+    schemaId: json.schema.id,
+    branchId: json.branch.id,
+    sources: sources.map((source) => ({
+      id: source.id,
+      path: source.path,
+      interfacePath: source.interfacePath,
+      libraryInterfaceFileFilter: resolveLibraryInterfaceFileFilter({
+        flag: libraryInterfaceFileFilterOverride,
+        source,
+        json,
+      }),
+    })),
+    force: json.force ?? false,
+    forceFeatures: json.forceFeatures,
+  };
+}
+
+// Writing anything at all is gated on result.ok here: a closed branch must leave
+// avo.json and every generated file exactly as they were.
+export function applyPullResult(
+  sourceFilter,
+  json: AvoJson,
+  result: ApiPullResult,
+  libraryInterfaceFileFilterOverride?: LibraryInterfaceFileFilter,
+  deps: {
+    runCodegen?: (avoJson: AvoJson, pullResult: ApiPullResult) => void;
+    retry?: (
+      filter,
+      avoJson: AvoJson,
+      override?: LibraryInterfaceFileFilter,
+    ) => void;
+  } = {},
+): void {
+  const runCodegen = deps.runCodegen ?? codegen;
+  const retry =
+    deps.retry ??
+    ((filter, data: AvoJson, override?: LibraryInterfaceFileFilter) => {
+      // eslint-disable-next-line no-use-before-define
+      checkout(null, data).then((next) => pull(filter, next, override));
+    });
+
+  if (result.ok) {
+    runCodegen(json, result);
+    return;
+  }
+
+  report.error(
+    `Branch ${result.branchName} was ${result.reason} ${dateFns.formatDistance(
+      new Date(),
+      new Date(result.closedAt),
+    )} ago. Pick another branch.`,
+  );
+  retry(sourceFilter, json, libraryInterfaceFileFilterOverride);
+}
+
+// The per-run override is an argument rather than a field on `json` on purpose:
+// codegen() deep-copies the json and writes it back to avo.json, so anything
+// merged into it becomes a permanent setting (see `force`).
+function pull(
+  sourceFilter,
+  json: AvoJson,
+  libraryInterfaceFileFilterOverride?: LibraryInterfaceFileFilter,
+): Promise<void> {
   const sources = sourceFilter
     ? [json.sources.find((source) => matchesSource(source, sourceFilter))]
     : json.sources;
@@ -1483,34 +1614,21 @@ function pull(sourceFilter, json: AvoJson): Promise<void> {
       api.request('POST', '/c/v1/pull', {
         origin: api.apiOrigin,
         auth: true,
-        json: {
-          schemaId: json.schema.id,
-          branchId: json.branch.id,
-          sources: sources.map((source) => ({
-            id: source.id,
-            path: source.path,
-            interfacePath: source.interfacePath,
-          })),
-          force: json.force ?? false,
-          forceFeatures: json.forceFeatures,
-        },
+        json: buildPullRequestBody(
+          json,
+          sources,
+          libraryInterfaceFileFilterOverride,
+        ),
       }),
     )
     .then((result: ApiPullResult) => {
       cancelWait();
-      if (result.ok) {
-        codegen(json, result);
-      } else {
-        report.error(
-          `Branch ${result.branchName} was ${
-            result.reason
-          } ${dateFns.formatDistance(
-            new Date(),
-            new Date(result.closedAt),
-          )} ago. Pick another branch.`,
-        );
-        checkout(null, json).then((data) => pull(sourceFilter, data));
-      }
+      applyPullResult(
+        sourceFilter,
+        json,
+        result,
+        libraryInterfaceFileFilterOverride,
+      );
     });
 }
 
@@ -2275,8 +2393,21 @@ if (isMainModule) {
                 'Optional comma separated list of features to force enable, pass unsupported name to get the list of available features',
               default: undefined,
               type: 'string',
+            })
+            .option('libraryInterfaceFileFilter', {
+              describe:
+                'Which files codegen should emit for sources using a library interface, for this run only. Overrides the avo.json setting without changing it',
+              choices: LIBRARY_INTERFACE_FILE_FILTER_VALUES,
+              default: undefined,
+              type: 'string',
             }),
         handler: (argv) => {
+          const libraryInterfaceFileFilterOverride =
+            argv.libraryInterfaceFileFilter === undefined
+              ? undefined
+              : parseLibraryInterfaceFileFilter(
+                  argv.libraryInterfaceFileFilter,
+                );
           loadAvoJsonOrInit({ argv, skipInit: false, skipPullMaster: false })
             .then((json) => {
               Avo.cliInvoked({
@@ -2294,11 +2425,13 @@ if (isMainModule) {
                 if (argv.branch && json.branch.name !== argv.branch) {
                   return checkout(argv.branch, json)
                     .then((data) => getSource(argv, data))
-                    .then(([source, data]) => pull(source, data));
+                    .then(([source, data]) =>
+                      pull(source, data, libraryInterfaceFileFilterOverride),
+                    );
                 }
                 report.info(`Pulling from branch '${json.branch.name}'`);
                 return getSource(argv, json).then(([source, data]) =>
-                  pull(source, data),
+                  pull(source, data, libraryInterfaceFileFilterOverride),
                 );
               });
             })
