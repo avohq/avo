@@ -16,7 +16,6 @@ import {
   eventNameToFileName,
   cleanupObsoleteEventFiles,
   buildFolderMessage,
-  buildInterfaceFolderMessage,
   buildFilenameMessage,
   buildInterfaceFilenameMessage,
   extractConflictingFiles,
@@ -38,6 +37,7 @@ import {
   init,
   collectStaleSuppressedFiles,
   buildStaleSuppressedFileWarning,
+  buildSourcePaths,
 } from './cli.js';
 
 // Each of these suites runs codegen against the real filesystem, so they need an
@@ -352,18 +352,6 @@ describe('Prompt message helpers', () => {
 
   it('buildFolderMessage falls back to src/analytics when outputDirExample is omitted', () => {
     const result = buildFolderMessage({});
-    expect(result).toContain('src/analytics');
-  });
-
-  it('buildInterfaceFolderMessage includes the provided outputDirExample', () => {
-    const result = buildInterfaceFolderMessage({
-      outputDirExample: 'Sources/Analytics',
-    });
-    expect(result).toContain('Sources/Analytics');
-  });
-
-  it('buildInterfaceFolderMessage falls back to src/analytics when outputDirExample is omitted', () => {
-    const result = buildInterfaceFolderMessage({});
     expect(result).toContain('src/analytics');
   });
 
@@ -1404,6 +1392,77 @@ describe('stale files from a previous filter', () => {
 
       expect(fs.existsSync('src/AvoEvents/eventClicked.ts')).toBe(true);
       expect(fs.existsSync('src/AvoEvents/eventViewed.ts')).toBe(true);
+    });
+  });
+});
+
+describe('buildSourcePaths', () => {
+  const cwd = path.resolve('/repo');
+
+  it('puts the interface file in the same folder as the events file', () => {
+    expect(
+      buildSourcePaths(
+        { folder: 'library/src/main/kotlin/sh/avo/library', filename: 'Avo.kt' },
+        { interfaceFilename: 'AvoInterface.kt' },
+        cwd,
+      ),
+    ).toEqual({
+      path: path.join(
+        'library',
+        'src',
+        'main',
+        'kotlin',
+        'sh',
+        'avo',
+        'library',
+        'Avo.kt',
+      ),
+      interfacePath: path.join(
+        'library',
+        'src',
+        'main',
+        'kotlin',
+        'sh',
+        'avo',
+        'library',
+        'AvoInterface.kt',
+      ),
+    });
+  });
+
+  it('splits a source into two filenames that never diverge in directory', () => {
+    const { path: mainPath, interfacePath } = buildSourcePaths(
+      { folder: 'app/src/main/kotlin/analytics', filename: 'Avo.kt' },
+      { interfaceFilename: 'AvoInterface.kt' },
+      cwd,
+    );
+
+    expect(path.dirname(mainPath)).toBe(path.dirname(interfacePath));
+    expect(path.basename(mainPath)).toBe('Avo.kt');
+    expect(path.basename(interfacePath)).toBe('AvoInterface.kt');
+  });
+
+  it('reuses the main path when the source cannot have an interface file', () => {
+    // canHaveInterfaceFile !== true skips the interface prompt entirely, so
+    // moreAnswers comes back empty and there is no second file to place.
+    expect(
+      buildSourcePaths({ folder: 'src', filename: 'Avo.ts' }, {}, cwd),
+    ).toEqual({
+      path: path.join('src', 'Avo.ts'),
+      interfacePath: path.join('src', 'Avo.ts'),
+    });
+  });
+
+  it('resolves an absolute folder answer back to a cwd-relative path', () => {
+    expect(
+      buildSourcePaths(
+        { folder: path.join(cwd, 'library'), filename: 'Avo.kt' },
+        { interfaceFilename: 'AvoInterface.kt' },
+        cwd,
+      ),
+    ).toEqual({
+      path: path.join('library', 'Avo.kt'),
+      interfacePath: path.join('library', 'AvoInterface.kt'),
     });
   });
 });

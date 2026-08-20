@@ -346,7 +346,12 @@ type ReqOptions = {
 const api = {
   authOrigin: 'https://www.avo.app',
 
-  apiOrigin: 'https://api.avo.app',
+  // Override to run against a local emulator. The reverse proxy in
+  // infrastructure/api-reverse-proxy listens on 3333 and forwards /c/v1/* to the
+  // functions emulator on 5001, so AVO_API_ORIGIN=http://127.0.0.1:3333 is the
+  // whole local setup. Auth still goes to authOrigin above, on purpose: tokens
+  // are issued by production and the emulator verifies them.
+  apiOrigin: process.env.AVO_API_ORIGIN ?? 'https://api.avo.app',
 
   setRefreshToken(token) {
     refreshToken = token;
@@ -1483,21 +1488,40 @@ export function buildFolderMessage(source: {
   return `${folderDescription}\n(e.g. ${examplePath})`;
 }
 
-export function buildInterfaceFolderMessage(source: {
-  outputDirExample?: string;
-}): string {
-  const examplePath = source.outputDirExample ?? 'src/analytics';
-  const interfaceFolderDescription =
-    'Generated interface file — place it inside your source tree';
-  return `${interfaceFolderDescription}\n(e.g. ${examplePath})`;
-}
-
 export function buildFilenameMessage(): string {
   return "This file is regenerated on every 'avo pull' — do not edit it manually";
 }
 
 export function buildInterfaceFilenameMessage(): string {
   return "This file is regenerated on every 'avo pull' — do not edit it manually";
+}
+
+// A source that splits into an events file and an interface file still gets one
+// folder: both files are generated side by side in it, and only the filenames
+// differ. Asking for a second folder implied the two could be separated, which
+// the generator does not support.
+export function buildSourcePaths(
+  answer: { folder: string; filename: string },
+  moreAnswers: { interfaceFilename?: string },
+  cwd: string = process.cwd(),
+): { path: string; interfacePath: string } {
+  const folder = path.resolve(cwd, answer.folder);
+  const relativeMainPath = path.relative(
+    cwd,
+    path.join(folder, answer.filename),
+  );
+  // Sources that cannot split have no interface filename, so both keys point at
+  // the single generated file.
+  if (moreAnswers.interfaceFilename == null) {
+    return { path: relativeMainPath, interfacePath: relativeMainPath };
+  }
+  return {
+    path: relativeMainPath,
+    interfacePath: path.relative(
+      cwd,
+      path.join(folder, moreAnswers.interfaceFilename),
+    ),
+  };
 }
 
 function selectSource(sourceToAdd: string, json: AvoJson) {
@@ -1599,19 +1623,6 @@ function selectSource(sourceToAdd: string, json: AvoJson) {
           answerSource.canHaveInterfaceFile === true
             ? [
                 {
-                  type: 'fuzzypath',
-                  name: 'folder',
-                  excludePath: (maybeExcludePath) =>
-                    maybeExcludePath.startsWith('node_modules') ||
-                    maybeExcludePath.startsWith('.git'),
-                  itemType: 'directory',
-                  rootPath: '.',
-                  message: buildInterfaceFolderMessage(answerSource),
-                  default: '.',
-                  suggestOnly: false,
-                  depthLimit: 10,
-                },
-                {
                   type: 'input',
                   name: 'interfaceFilename',
                   message: buildInterfaceFilenameMessage(),
@@ -1626,21 +1637,8 @@ function selectSource(sourceToAdd: string, json: AvoJson) {
               ]
             : [],
         );
-        const hasMultiPath = moreAnswers.interfaceFilename != null;
-        const relativeMainPath = path.relative(
-          process.cwd(),
-          path.join(path.resolve(answer.folder), answer.filename),
-        );
-        let relativeInterfacePath = relativeMainPath;
-        if (hasMultiPath) {
-          relativeInterfacePath = path.relative(
-            process.cwd(),
-            path.join(
-              path.resolve(answer.folder),
-              moreAnswers.interfaceFilename,
-            ),
-          );
-        }
+        const { path: relativeMainPath, interfacePath: relativeInterfacePath } =
+          buildSourcePaths(answer, moreAnswers);
         let source;
         if (sourceToAdd) {
           source = sources.find((sourceToFind) =>
