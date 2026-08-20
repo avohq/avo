@@ -25,6 +25,7 @@ import {
   LIBRARY_INTERFACE_FILE_FILTER_VALUES,
   parseLibraryInterfaceFileFilter,
   resolveLibraryInterfaceFileFilter,
+  resolveLibraryInterfaceSharedModule,
   buildPullRequestBody,
   validateAvoJson,
   loadAvoJson,
@@ -389,7 +390,12 @@ describe('avo.json merge conflict resolution', () => {
     '<<<<<<< HEAD',
     '  "branch": { "id": "branch-head", "name": "head-branch" },',
     '  "libraryInterfaceFileFilter": "events-only",',
+    '  "libraryInterfaceSharedModule": "@acme/analytics",',
     '  "teamNote": "shared interface repo",',
+    // Committed by any repo that has ever run `avo pull -f` — this repo's own
+    // avo.json on main carries it.
+    '  "force": true,',
+    '  "forceFeatures": "AddUserPropertiesParameterInLogEvent",',
     '=======',
     '  "branch": { "id": "branch-incoming", "name": "incoming-branch" },',
     '>>>>>>> incoming',
@@ -451,6 +457,24 @@ describe('avo.json merge conflict resolution', () => {
         name: 'head-branch',
       });
       expect(resolved.sources).toEqual(head.sources);
+    });
+
+    // `force` and `forceFeatures` are per-invocation flags, not settings:
+    // loadAvoJsonOrInit stamps them into the in-memory json and codegen persists
+    // it, so they end up committed. Carrying them out of conflict resolution
+    // turns the follow-up main-pull into an unprompted force-merge, which
+    // discards changes to items archived on main.
+    it('drops a committed force and forceFeatures', () => {
+      const [head] = parseConflictSides(conflictedAvoJson);
+      expect(head.force).toBe(true);
+      expect(head.forceFeatures).toBe('AddUserPropertiesParameterInLogEvent');
+
+      const resolved = buildResolvedAvoJson(head) as Record<string, any>;
+
+      expect('force' in resolved).toBe(false);
+      expect('forceFeatures' in resolved).toBe(false);
+      // Still a spread, not a whitelist: unknown state must survive alongside.
+      expect(resolved.teamNote).toBe('shared interface repo');
     });
 
     it('keeps a per-source key on a HEAD source', () => {
@@ -605,6 +629,47 @@ describe('libraryInterfaceFileFilter', () => {
     });
   });
 
+  describe('resolveLibraryInterfaceSharedModule', () => {
+    it('prefers the per-source value', () => {
+      expect(
+        resolveLibraryInterfaceSharedModule({
+          source: { libraryInterfaceSharedModule: 'com.acme.analytics' },
+          json: { libraryInterfaceSharedModule: '@acme/analytics' },
+        }),
+      ).toBe('com.acme.analytics');
+    });
+
+    it('falls back to the top-level value', () => {
+      expect(
+        resolveLibraryInterfaceSharedModule({
+          source: {},
+          json: { libraryInterfaceSharedModule: '@acme/analytics' },
+        }),
+      ).toBe('@acme/analytics');
+    });
+
+    it('is undefined when neither level sets it', () => {
+      expect(
+        resolveLibraryInterfaceSharedModule({ source: {}, json: {} }),
+      ).toBeUndefined();
+    });
+
+    // The value is a handle consumed verbatim server-side — a Kotlin package or a
+    // TS module specifier. The CLI has no language field and must derive nothing.
+    it('returns the value verbatim, whatever shape it has', () => {
+      ['../../shell/AvoLibrary', 'com.acme.analytics', '@acme/analytics'].forEach(
+        (value) => {
+          expect(
+            resolveLibraryInterfaceSharedModule({
+              source: { libraryInterfaceSharedModule: value },
+              json: {},
+            }),
+          ).toBe(value);
+        },
+      );
+    });
+  });
+
   describe('buildPullRequestBody', () => {
     it('resolves each source independently in one request', () => {
       const json: any = baseJson();
@@ -617,7 +682,31 @@ describe('libraryInterfaceFileFilter', () => {
       expect(body.sources[1].libraryInterfaceFileFilter).toBe('events-only');
     });
 
-    it('sends exactly the four per-source fields', () => {
+    it('sends exactly the five per-source fields', () => {
+      const json: any = baseJson();
+      json.sources[0].libraryInterfaceSharedModule = '@acme/analytics';
+
+      const body = buildPullRequestBody(json, json.sources);
+
+      expect(Object.keys(body.sources[0])).toEqual([
+        'id',
+        'path',
+        'interfacePath',
+        'libraryInterfaceFileFilter',
+        'libraryInterfaceSharedModule',
+      ]);
+      expect(body.sources[0]).toEqual({
+        id: 'source-1',
+        path: 'src/Avo.ts',
+        interfacePath: 'src/Avo.ts',
+        libraryInterfaceFileFilter: 'all',
+        libraryInterfaceSharedModule: '@acme/analytics',
+      });
+    });
+
+    // Omitted rather than sent as "" — the server reads the key's presence, and an
+    // empty string is a handle that would reach the generators verbatim.
+    it('omits libraryInterfaceSharedModule entirely when unset', () => {
       const json: any = baseJson();
 
       const body = buildPullRequestBody(json, json.sources);
@@ -628,12 +717,23 @@ describe('libraryInterfaceFileFilter', () => {
         'interfacePath',
         'libraryInterfaceFileFilter',
       ]);
-      expect(body.sources[0]).toEqual({
-        id: 'source-1',
-        path: 'src/Avo.ts',
-        interfacePath: 'src/Avo.ts',
-        libraryInterfaceFileFilter: 'all',
-      });
+      expect('libraryInterfaceSharedModule' in body.sources[0]).toBe(false);
+    });
+
+    it('forwards the module raw, with no client-side derivation', () => {
+      const json: any = baseJson();
+      // A relative TS specifier: the CLI must not resolve, normalise or re-root it.
+      json.libraryInterfaceSharedModule = '../../shell/AvoLibrary';
+      json.sources[1].libraryInterfaceSharedModule = 'com.acme.analytics';
+
+      const body = buildPullRequestBody(json, json.sources);
+
+      expect(body.sources[0].libraryInterfaceSharedModule).toBe(
+        '../../shell/AvoLibrary',
+      );
+      expect(body.sources[1].libraryInterfaceSharedModule).toBe(
+        'com.acme.analytics',
+      );
     });
 
     it('leaves the top-level body fields unchanged', () => {
@@ -880,6 +980,10 @@ describe('avo init and libraryInterfaceFileFilter', () => {
       expect(line).toContain('events-only');
       expect(line).toContain('all');
       expect(line).toContain('avo.json');
+      // The two settings are useless apart — a filter without a module ships a
+      // broken import, a module without the filter is inert — so the discovery
+      // line must name both to an already-initialised repo.
+      expect(line).toContain('libraryInterfaceSharedModule');
     });
 
     it('the prompt offers all three values and explains when it applies', () => {
@@ -977,9 +1081,12 @@ describe('avo init and libraryInterfaceFileFilter', () => {
 
   describe('init()', () => {
     it('prompts for the filter on the single-workspace branch, which skips the workspace picker', async () => {
-      const promptFn = jest.fn(async () => ({
-        libraryInterfaceFileFilter: 'interface-only',
-      })) as any;
+      const promptFn = jest.fn(async (questions: any) => {
+        if (questions[0].name === 'libraryInterfaceSharedModule') {
+          return { libraryInterfaceSharedModule: '@acme/analytics' };
+        }
+        return { libraryInterfaceFileFilter: 'interface-only' };
+      }) as any;
 
       const json: any = await init(undefined, {
         fetchWorkspaces: fetchWorkspaces(workspace),
@@ -988,8 +1095,10 @@ describe('avo init and libraryInterfaceFileFilter', () => {
         isCi: false,
       });
 
-      expect(promptFn).toHaveBeenCalledTimes(1);
+      // Two prompts: the filter, then the module the filter makes relevant.
+      expect(promptFn).toHaveBeenCalledTimes(2);
       expect(json.libraryInterfaceFileFilter).toBe('interface-only');
+      expect(json.libraryInterfaceSharedModule).toBe('@acme/analytics');
       // No library-mode gate: at init time there are no sources at all.
       expect('sources' in json).toBe(false);
     });
@@ -998,6 +1107,9 @@ describe('avo init and libraryInterfaceFileFilter', () => {
       const promptFn = jest.fn(async (questions: any) => {
         if (questions[0].name === 'schema') {
           return { schema: otherWorkspace };
+        }
+        if (questions[0].name === 'libraryInterfaceSharedModule') {
+          return { libraryInterfaceSharedModule: 'com.acme.analytics' };
         }
         return { libraryInterfaceFileFilter: 'events-only' };
       }) as any;
@@ -1009,9 +1121,66 @@ describe('avo init and libraryInterfaceFileFilter', () => {
         isCi: false,
       });
 
-      expect(promptFn).toHaveBeenCalledTimes(2);
+      expect(promptFn).toHaveBeenCalledTimes(3);
       expect(json.schema.id).toBe('schema-2');
       expect(json.libraryInterfaceFileFilter).toBe('events-only');
+      expect(json.libraryInterfaceSharedModule).toBe('com.acme.analytics');
+    });
+
+    // A client repo cannot use the split without naming what it imports from, so
+    // the module prompt is gated on the filter the user just chose — never on 'all',
+    // where nothing reads the value.
+    it("does not ask for the module when the filter is 'all'", async () => {
+      const promptFn = jest.fn(async () => ({
+        libraryInterfaceFileFilter: 'all',
+      })) as any;
+
+      const json: any = await init(undefined, {
+        fetchWorkspaces: fetchWorkspaces(workspace),
+        promptFn,
+        isTTY: true,
+        isCi: false,
+      });
+
+      expect(promptFn).toHaveBeenCalledTimes(1);
+      expect('libraryInterfaceSharedModule' in json).toBe(false);
+    });
+
+    it('omits the key when the module prompt is answered empty', async () => {
+      const promptFn = jest.fn(async (questions: any) => {
+        if (questions[0].name === 'libraryInterfaceSharedModule') {
+          return { libraryInterfaceSharedModule: '  ' };
+        }
+        return { libraryInterfaceFileFilter: 'events-only' };
+      }) as any;
+
+      const json: any = await init(undefined, {
+        fetchWorkspaces: fetchWorkspaces(workspace),
+        promptFn,
+        isTTY: true,
+        isCi: false,
+      });
+
+      expect(promptFn).toHaveBeenCalledTimes(2);
+      expect(json.libraryInterfaceFileFilter).toBe('events-only');
+      expect('libraryInterfaceSharedModule' in json).toBe(false);
+    });
+
+    it('pre-answers the module from --libraryInterfaceSharedModule', async () => {
+      const promptFn = jest.fn(async () => ({
+        libraryInterfaceFileFilter: 'events-only',
+      })) as any;
+
+      const json: any = await init(undefined, {
+        fetchWorkspaces: fetchWorkspaces(workspace),
+        promptFn,
+        isTTY: true,
+        isCi: false,
+        libraryInterfaceSharedModulePreAnswer: '@acme/analytics',
+      });
+
+      expect(promptFn).toHaveBeenCalledTimes(1);
+      expect(json.libraryInterfaceSharedModule).toBe('@acme/analytics');
     });
 
     it("writes only the explicit key when the user chooses 'all'", async () => {
@@ -1067,8 +1236,11 @@ describe('avo init and libraryInterfaceFileFilter', () => {
       expect(reportInfo).toHaveBeenCalledTimes(1);
     });
 
-    it('pre-answers from --libraryInterfaceFileFilter without prompting', async () => {
-      const promptFn = jest.fn();
+    it('pre-answers the filter but still asks for the module when the filter is not all', async () => {
+      const promptFn = jest.fn(async (questions: any) => {
+        expect(questions[0].name).toBe('libraryInterfaceSharedModule');
+        return { libraryInterfaceSharedModule: '@acme/analytics' };
+      });
       process.stdin.isTTY = true;
 
       const json: any = await init('events-only', {
@@ -1076,8 +1248,24 @@ describe('avo init and libraryInterfaceFileFilter', () => {
         promptFn: promptFn as any,
       });
 
+      expect(promptFn).toHaveBeenCalledTimes(1);
+      expect(json.libraryInterfaceFileFilter).toBe('events-only');
+      expect(json.libraryInterfaceSharedModule).toBe('@acme/analytics');
+    });
+
+    it('pre-answers both without prompting', async () => {
+      const promptFn = jest.fn();
+      process.stdin.isTTY = true;
+
+      const json: any = await init('events-only', {
+        fetchWorkspaces: fetchWorkspaces(workspace),
+        promptFn: promptFn as any,
+        libraryInterfaceSharedModulePreAnswer: '@acme/analytics',
+      });
+
       expect(promptFn).not.toHaveBeenCalled();
       expect(json.libraryInterfaceFileFilter).toBe('events-only');
+      expect(json.libraryInterfaceSharedModule).toBe('@acme/analytics');
     });
   });
 

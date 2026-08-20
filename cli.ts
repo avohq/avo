@@ -484,6 +484,11 @@ type Source = {
   updatedAt: string;
   interfacePath?: string;
   libraryInterfaceFileFilter?: LibraryInterfaceFileFilter;
+  // The module this source's event files import the SHARED library interface from
+  // — a Kotlin package or a TypeScript module specifier, consumed verbatim
+  // server-side. Distinct from interfacePath above, which names this source's own
+  // classic-split base file.
+  libraryInterfaceSharedModule?: string;
   analysis?: {
     glob: string;
     module?: string;
@@ -501,6 +506,7 @@ type AvoJson = {
   force?: boolean;
   forceFeatures?: string;
   libraryInterfaceFileFilter?: LibraryInterfaceFileFilter;
+  libraryInterfaceSharedModule?: string;
   sources?: Source[];
 };
 
@@ -536,6 +542,20 @@ export function resolveLibraryInterfaceFileFilter({
     source.libraryInterfaceFileFilter ??
     json.libraryInterfaceFileFilter ??
     'all'
+  );
+}
+
+// No flag arm and no default: the handle is a value the server consumes verbatim,
+// so "unset" has to stay distinguishable from every string a user could pick.
+export function resolveLibraryInterfaceSharedModule({
+  source,
+  json,
+}: {
+  source: Pick<Source, 'libraryInterfaceSharedModule'>;
+  json: Pick<AvoJson, 'libraryInterfaceSharedModule'>;
+}): string | undefined {
+  return (
+    source.libraryInterfaceSharedModule ?? json.libraryInterfaceSharedModule
   );
 }
 
@@ -727,7 +747,20 @@ export function buildLibraryInterfaceFileFilterInfoLine(): string {
     'avo pull',
   )} generates for sources using a library interface: ${LIBRARY_INTERFACE_FILE_FILTER_VALUES.join(
     ', ',
-  )} (defaults to all)`;
+  )} (defaults to all). When it is not ${bold('all')}, set ${bold(
+    'libraryInterfaceSharedModule',
+  )} to the module your event files import the shared interface from`;
+}
+
+export function buildLibraryInterfaceSharedModulePrompt() {
+  return {
+    type: 'input',
+    name: 'libraryInterfaceSharedModule',
+    message:
+      'Which module should the generated event files import the shared library interface from?\n' +
+      '(A Kotlin package or a TypeScript module specifier, used verbatim. Leave empty to set it later in avo.json)',
+    default: '',
+  };
 }
 
 export function buildLibraryInterfaceFileFilterPrompt() {
@@ -758,6 +791,7 @@ export function buildLibraryInterfaceFileFilterPrompt() {
 type InitPromptAnswers = {
   schema?: { id: string; name: string };
   libraryInterfaceFileFilter?: LibraryInterfaceFileFilter;
+  libraryInterfaceSharedModule?: string;
 };
 
 type InitDeps = {
@@ -766,6 +800,7 @@ type InitDeps = {
   isTTY?: boolean;
   isCi?: boolean;
   reportInfo?: (text: string) => void;
+  libraryInterfaceSharedModulePreAnswer?: string;
 };
 
 // Asked only where a human can answer: init() is reached implicitly from pull,
@@ -791,6 +826,44 @@ export function resolveInitLibraryInterfaceFileFilter({
 
   return promptFn([buildLibraryInterfaceFileFilterPrompt()]).then(
     (answer) => answer.libraryInterfaceFileFilter,
+  );
+}
+
+// Gated on the filter the user just chose: under 'all' nothing reads the handle,
+// so asking for it would be a question with no consequence. An explicit
+// --libraryInterfaceSharedModule is honoured regardless of the filter, because
+// setting the module before flipping the filter is a supported order and is inert
+// until the filter changes.
+export function resolveInitLibraryInterfaceSharedModule({
+  preAnswer,
+  libraryInterfaceFileFilter,
+  isTTY = Boolean(process.stdin.isTTY),
+  isCi = invokedByCi(),
+  promptFn = inquirer.prompt,
+}: {
+  preAnswer?: string;
+  libraryInterfaceFileFilter?: LibraryInterfaceFileFilter;
+} & InitDeps = {}): Promise<string | undefined> {
+  const omitIfBlank = (value: string | undefined) => {
+    const trimmed = (value ?? '').trim();
+    return trimmed === '' ? undefined : trimmed;
+  };
+
+  if (preAnswer !== undefined) {
+    return Promise.resolve(omitIfBlank(preAnswer));
+  }
+
+  if (
+    libraryInterfaceFileFilter === undefined ||
+    libraryInterfaceFileFilter === 'all' ||
+    !isTTY ||
+    isCi
+  ) {
+    return Promise.resolve(undefined);
+  }
+
+  return promptFn([buildLibraryInterfaceSharedModulePrompt()]).then((answer) =>
+    omitIfBlank(answer.libraryInterfaceSharedModule),
   );
 }
 
@@ -821,22 +894,38 @@ export function init(
       isCi: deps.isCi,
       promptFn,
       reportInfo: deps.reportInfo,
-    }).then((libraryInterfaceFileFilter) => ({
-      avo: {
-        version: semver.major(pkg.version),
-      },
-      schema: {
-        id: schema.id,
-        name: schema.name,
-      },
-      branch: {
-        id: 'master',
-        name: 'main',
-      },
-      ...(libraryInterfaceFileFilter === undefined
-        ? {}
-        : { libraryInterfaceFileFilter }),
-    }));
+    })
+      .then((libraryInterfaceFileFilter) =>
+        resolveInitLibraryInterfaceSharedModule({
+          preAnswer: deps.libraryInterfaceSharedModulePreAnswer,
+          libraryInterfaceFileFilter,
+          isTTY: deps.isTTY,
+          isCi: deps.isCi,
+          promptFn,
+        }).then((libraryInterfaceSharedModule) => ({
+          libraryInterfaceFileFilter,
+          libraryInterfaceSharedModule,
+        })),
+      )
+      .then(({ libraryInterfaceFileFilter, libraryInterfaceSharedModule }) => ({
+        avo: {
+          version: semver.major(pkg.version),
+        },
+        schema: {
+          id: schema.id,
+          name: schema.name,
+        },
+        branch: {
+          id: 'master',
+          name: 'main',
+        },
+        ...(libraryInterfaceFileFilter === undefined
+          ? {}
+          : { libraryInterfaceFileFilter }),
+        ...(libraryInterfaceSharedModule === undefined
+          ? {}
+          : { libraryInterfaceSharedModule }),
+      }));
   };
 
   wait('Initializing');
@@ -1009,9 +1098,17 @@ function checkout(branchToCheckout: string, json: AvoJson): Promise<AvoJson> {
 // Spreads HEAD before the explicit keys so top-level avo.json state this CLI does not
 // know about survives conflict resolution — the result is written straight to disk, so
 // rebuilding from a fixed key list drops the unknown keys permanently.
+//
+// force/forceFeatures are excluded because they are per-invocation flags, not
+// settings: loadAvoJsonOrInit stamps them into the in-memory json and codegen
+// persists it, so any repo that has ever run `avo pull -f` carries `"force": true`
+// in git. Spreading that back out of conflict resolution would hand it to the
+// follow-up main-pull, which force-merges past merge warnings and discards
+// changes to items archived on main — without ever prompting.
 export function buildResolvedAvoJson(head: AvoJson): AvoJson {
+  const { force, forceFeatures, ...rest } = head;
   return {
-    ...head,
+    ...rest,
     avo: head.avo,
     schema: head.schema,
     branch: head.branch,
@@ -1684,16 +1781,30 @@ export function buildPullRequestBody(
   return {
     schemaId: json.schema.id,
     branchId: json.branch.id,
-    sources: sources.map((source) => ({
-      id: source.id,
-      path: source.path,
-      interfacePath: source.interfacePath,
-      libraryInterfaceFileFilter: resolveLibraryInterfaceFileFilter({
-        flag: libraryInterfaceFileFilterOverride,
+    sources: sources.map((source) => {
+      // Forwarded raw. The CLI has no language field, so it cannot know whether
+      // this is a Kotlin package or a TS specifier — deriving anything from it
+      // here would be guessing. Omitted rather than sent as "", because the
+      // server reads the key's presence and an empty handle would reach the
+      // generators verbatim.
+      const libraryInterfaceSharedModule = resolveLibraryInterfaceSharedModule({
         source,
         json,
-      }),
-    })),
+      });
+      return {
+        id: source.id,
+        path: source.path,
+        interfacePath: source.interfacePath,
+        libraryInterfaceFileFilter: resolveLibraryInterfaceFileFilter({
+          flag: libraryInterfaceFileFilterOverride,
+          source,
+          json,
+        }),
+        ...(libraryInterfaceSharedModule === undefined
+          ? {}
+          : { libraryInterfaceSharedModule }),
+      };
+    }),
     force: json.force ?? false,
     forceFeatures: json.forceFeatures,
   };
@@ -2464,13 +2575,20 @@ if (isMainModule) {
         command: 'init',
         describe: 'Initialize an Avo workspace in the current folder',
         builder: (initYargs) =>
-          initYargs.option('libraryInterfaceFileFilter', {
-            describe:
-              'Which files avo pull should generate for sources using a library interface. Skips the prompt and writes the value to avo.json',
-            choices: LIBRARY_INTERFACE_FILE_FILTER_VALUES,
-            default: undefined,
-            type: 'string',
-          }),
+          initYargs
+            .option('libraryInterfaceFileFilter', {
+              describe:
+                'Which files avo pull should generate for sources using a library interface. Skips the prompt and writes the value to avo.json',
+              choices: LIBRARY_INTERFACE_FILE_FILTER_VALUES,
+              default: undefined,
+              type: 'string',
+            })
+            .option('libraryInterfaceSharedModule', {
+              describe:
+                'The module the generated event files import the shared library interface from — a Kotlin package or a TypeScript module specifier. Skips the prompt and writes the value to avo.json',
+              default: undefined,
+              type: 'string',
+            }),
         handler: (argv) => {
           const libraryInterfaceFileFilterPreAnswer =
             argv.libraryInterfaceFileFilter === undefined
@@ -2478,6 +2596,10 @@ if (isMainModule) {
               : parseLibraryInterfaceFileFilter(
                   argv.libraryInterfaceFileFilter,
                 );
+          const libraryInterfaceSharedModulePreAnswer =
+            argv.libraryInterfaceSharedModule === undefined
+              ? undefined
+              : String(argv.libraryInterfaceSharedModule);
           loadAvoJsonOrInit({ argv, skipPullMaster: false, skipInit: true })
             .then((json) => {
               if (json) {
@@ -2501,11 +2623,14 @@ if (isMainModule) {
                 // prompt is unreachable there. Say so explicitly when a value was
                 // passed — silently discarding it while the flag's help text says it
                 // gets written to avo.json is how a user ends up believing it applied.
-                if (libraryInterfaceFileFilterPreAnswer !== undefined) {
+                if (
+                  libraryInterfaceFileFilterPreAnswer !== undefined ||
+                  libraryInterfaceSharedModulePreAnswer !== undefined
+                ) {
                   report.warn(
-                    `Ignoring --libraryInterfaceFileFilter because ${file(
+                    `Ignoring --libraryInterfaceFileFilter/--libraryInterfaceSharedModule because ${file(
                       'avo.json',
-                    )} already exists. Edit ${file('avo.json')} to change it.`,
+                    )} already exists. Edit ${file('avo.json')} to change them.`,
                   );
                 } else if (json.libraryInterfaceFileFilter === undefined) {
                   report.info(buildLibraryInterfaceFileFilterInfoLine());
@@ -2525,7 +2650,9 @@ if (isMainModule) {
                 forceFeatures: undefined,
               });
               return requireAuth(argv as any, () =>
-                init(libraryInterfaceFileFilterPreAnswer)
+                init(libraryInterfaceFileFilterPreAnswer, {
+                  libraryInterfaceSharedModulePreAnswer,
+                })
                   .then(writeAvoJson)
                   .then(() => {
                     report.info(
