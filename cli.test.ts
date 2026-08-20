@@ -35,8 +35,6 @@ import {
   codegen,
   applyPullResult,
   buildLibraryInterfaceFileFilterInfoLine,
-  buildLibraryInterfaceFileFilterPrompt,
-  resolveInitLibraryInterfaceFileFilter,
   init,
   collectStaleSuppressedFiles,
   buildStaleSuppressedFileWarning,
@@ -1054,14 +1052,11 @@ describe('libraryInterfaceFileFilter', () => {
 
 describe('avo init and libraryInterfaceFileFilter', () => {
   const workspace = { id: 'schema-1', name: 'Test Workspace' };
-  const otherWorkspace = { id: 'schema-2', name: 'Other Workspace' };
 
   let previousCi: string | undefined;
-  let previousIsTTY: boolean | undefined;
 
   beforeEach(() => {
     previousCi = process.env.CI;
-    previousIsTTY = process.stdin.isTTY;
     delete process.env.CI;
   });
 
@@ -1071,7 +1066,6 @@ describe('avo init and libraryInterfaceFileFilter', () => {
     } else {
       process.env.CI = previousCi;
     }
-    process.stdin.isTTY = previousIsTTY;
   });
 
   const fetchWorkspaces =
@@ -1079,301 +1073,62 @@ describe('avo init and libraryInterfaceFileFilter', () => {
     () =>
       Promise.resolve({ workspaces } as any);
 
-  describe('copy helpers', () => {
-    it('the info line names the setting, its values and where to set it', () => {
+  // The info line is the only discovery surface now that init does not prompt —
+  // the way to enable the feature is to edit avo.json, so the line must name
+  // both settings and where they live.
+  describe('buildLibraryInterfaceFileFilterInfoLine', () => {
+    it('names both settings and their values and where they go', () => {
       const line = buildLibraryInterfaceFileFilterInfoLine();
 
       expect(line).toContain('libraryInterfaceFileFilter');
+      expect(line).toContain('libraryInterfaceSharedModule');
       expect(line).toContain('interface-only');
       expect(line).toContain('events-only');
       expect(line).toContain('all');
       expect(line).toContain('avo.json');
-      // The two settings are useless apart — a filter without a module ships a
-      // broken import, a module without the filter is inert — so the discovery
-      // line must name both to an already-initialised repo.
-      expect(line).toContain('libraryInterfaceSharedModule');
-    });
-
-    it('the prompt offers all three values and explains when it applies', () => {
-      const prompt: any = buildLibraryInterfaceFileFilterPrompt();
-
-      expect(prompt.type).toBe('list');
-      expect(prompt.name).toBe('libraryInterfaceFileFilter');
-      expect(prompt.choices.map((choice: any) => choice.value)).toEqual([
-        'interface-only',
-        'events-only',
-        'all',
-      ]);
-      expect(prompt.message).toMatch(/generate/i);
-      expect(prompt.message).toMatch(/library interface/i);
     });
   });
 
-  describe('resolveInitLibraryInterfaceFileFilter', () => {
-    it('asks once when a TTY is present and CI is unset', async () => {
-      const promptFn = jest.fn(async () => ({
-        libraryInterfaceFileFilter: 'events-only',
-      })) as any;
-      const reportInfo = jest.fn();
+  // Locked-in decision: init leaves both keys absent (absent means 'all') and
+  // prints the info line — no prompt, no --flag, no --pre-answer. Advanced
+  // setup, few users reach it; the cost of prompting every user was worse than
+  // the discoverability cost of not prompting.
+  describe('init() never prompts for the split-mode settings', () => {
+    it('single-workspace: no prompt, omits both keys', async () => {
+      const promptFn = jest.fn() as any;
+      const reportInfo = jest.fn<(text: string) => void>();
 
-      const result = await resolveInitLibraryInterfaceFileFilter({
-        isTTY: true,
-        isCi: false,
-        promptFn,
-        reportInfo,
-      });
-
-      expect(promptFn).toHaveBeenCalledTimes(1);
-      expect(result).toBe('events-only');
-      expect(reportInfo).not.toHaveBeenCalled();
-    });
-
-    it('skips the prompt and prints exactly one info line without a TTY', async () => {
-      const promptFn = jest.fn();
-      const reportInfo = jest.fn();
-
-      const result = await resolveInitLibraryInterfaceFileFilter({
-        isTTY: false,
-        isCi: false,
-        promptFn: promptFn as any,
-        reportInfo,
-      });
-
-      expect(promptFn).not.toHaveBeenCalled();
-      expect(result).toBeUndefined();
-      expect(reportInfo).toHaveBeenCalledTimes(1);
-    });
-
-    it('skips the prompt in CI even with a TTY', async () => {
-      const promptFn = jest.fn();
-      const reportInfo = jest.fn();
-
-      const result = await resolveInitLibraryInterfaceFileFilter({
-        isTTY: true,
-        isCi: true,
-        promptFn: promptFn as any,
-        reportInfo,
-      });
-
-      expect(promptFn).not.toHaveBeenCalled();
-      expect(result).toBeUndefined();
-      expect(reportInfo).toHaveBeenCalledTimes(1);
-    });
-
-    it('uses the pre-answer instead of prompting, even with a TTY', async () => {
-      const promptFn = jest.fn();
-      const reportInfo = jest.fn();
-
-      const result = await resolveInitLibraryInterfaceFileFilter({
-        preAnswer: 'events-only',
-        isTTY: true,
-        isCi: false,
-        promptFn: promptFn as any,
-        reportInfo,
-      });
-
-      expect(promptFn).not.toHaveBeenCalled();
-      expect(result).toBe('events-only');
-    });
-
-    it('rejects an invalid pre-answer', () => {
-      expect(() =>
-        resolveInitLibraryInterfaceFileFilter({
-          preAnswer: 'eventsonly' as any,
-          isTTY: true,
-          isCi: false,
-        }),
-      ).toThrow(/must be one of interface-only, events-only, all/);
-    });
-  });
-
-  describe('init()', () => {
-    it('prompts for the filter on the single-workspace branch, which skips the workspace picker', async () => {
-      const promptFn = jest.fn(async (questions: any) => {
-        if (questions[0].name === 'libraryInterfaceSharedModule') {
-          return { libraryInterfaceSharedModule: '@acme/analytics' };
-        }
-        return { libraryInterfaceFileFilter: 'interface-only' };
-      }) as any;
-
-      const json: any = await init(undefined, {
+      const json: any = await init({
         fetchWorkspaces: fetchWorkspaces(workspace),
         promptFn,
-        isTTY: true,
-        isCi: false,
+        reportInfo,
       });
 
-      // Two prompts: the filter, then the module the filter makes relevant.
-      expect(promptFn).toHaveBeenCalledTimes(2);
-      expect(json.libraryInterfaceFileFilter).toBe('interface-only');
-      expect(json.libraryInterfaceSharedModule).toBe('@acme/analytics');
-      // No library-mode gate: at init time there are no sources at all.
-      expect('sources' in json).toBe(false);
+      expect(promptFn).not.toHaveBeenCalled();
+      expect('libraryInterfaceFileFilter' in json).toBe(false);
+      expect('libraryInterfaceSharedModule' in json).toBe(false);
+      const infoLines = reportInfo.mock.calls.map((c) => String(c[0])).join('\n');
+      expect(infoLines).toContain('libraryInterfaceFileFilter');
+      expect(infoLines).toContain('libraryInterfaceSharedModule');
     });
 
-    it('prompts on the multi-workspace branch too', async () => {
+    it('multi-workspace: prompts ONLY for the workspace picker, omits both keys', async () => {
+      const otherWorkspace = { id: 'schema-2', name: 'Other Workspace' };
       const promptFn = jest.fn(async (questions: any) => {
-        if (questions[0].name === 'schema') {
-          return { schema: otherWorkspace };
-        }
-        if (questions[0].name === 'libraryInterfaceSharedModule') {
-          return { libraryInterfaceSharedModule: 'com.acme.analytics' };
-        }
-        return { libraryInterfaceFileFilter: 'events-only' };
+        expect(questions[0].name).toBe('schema');
+        return { schema: otherWorkspace };
       }) as any;
 
-      const json: any = await init(undefined, {
+      const json: any = await init({
         fetchWorkspaces: fetchWorkspaces(workspace, otherWorkspace),
         promptFn,
-        isTTY: true,
-        isCi: false,
+        reportInfo: () => {},
       });
 
-      expect(promptFn).toHaveBeenCalledTimes(3);
+      expect(promptFn).toHaveBeenCalledTimes(1);
       expect(json.schema.id).toBe('schema-2');
-      expect(json.libraryInterfaceFileFilter).toBe('events-only');
-      expect(json.libraryInterfaceSharedModule).toBe('com.acme.analytics');
-    });
-
-    // A client repo cannot use the split without naming what it imports from, so
-    // the module prompt is gated on the filter the user just chose — never on 'all',
-    // where nothing reads the value.
-    it("does not ask for the module when the filter is 'all'", async () => {
-      const promptFn = jest.fn(async () => ({
-        libraryInterfaceFileFilter: 'all',
-      })) as any;
-
-      const json: any = await init(undefined, {
-        fetchWorkspaces: fetchWorkspaces(workspace),
-        promptFn,
-        isTTY: true,
-        isCi: false,
-      });
-
-      expect(promptFn).toHaveBeenCalledTimes(1);
-      expect('libraryInterfaceSharedModule' in json).toBe(false);
-    });
-
-    it('omits the key when the module prompt is answered empty', async () => {
-      const promptFn = jest.fn(async (questions: any) => {
-        if (questions[0].name === 'libraryInterfaceSharedModule') {
-          return { libraryInterfaceSharedModule: '  ' };
-        }
-        return { libraryInterfaceFileFilter: 'events-only' };
-      }) as any;
-
-      const json: any = await init(undefined, {
-        fetchWorkspaces: fetchWorkspaces(workspace),
-        promptFn,
-        isTTY: true,
-        isCi: false,
-      });
-
-      expect(promptFn).toHaveBeenCalledTimes(2);
-      expect(json.libraryInterfaceFileFilter).toBe('events-only');
-      expect('libraryInterfaceSharedModule' in json).toBe(false);
-    });
-
-    it('pre-answers the module from --libraryInterfaceSharedModule', async () => {
-      const promptFn = jest.fn(async () => ({
-        libraryInterfaceFileFilter: 'events-only',
-      })) as any;
-
-      const json: any = await init(undefined, {
-        fetchWorkspaces: fetchWorkspaces(workspace),
-        promptFn,
-        isTTY: true,
-        isCi: false,
-        libraryInterfaceSharedModulePreAnswer: '@acme/analytics',
-      });
-
-      expect(promptFn).toHaveBeenCalledTimes(1);
-      expect(json.libraryInterfaceSharedModule).toBe('@acme/analytics');
-    });
-
-    it("writes only the explicit key when the user chooses 'all'", async () => {
-      const promptFn = jest.fn(async () => ({
-        libraryInterfaceFileFilter: 'all',
-      })) as any;
-
-      const json: any = await init(undefined, {
-        fetchWorkspaces: fetchWorkspaces(workspace),
-        promptFn,
-        isTTY: true,
-        isCi: false,
-      });
-
-      expect(json).toEqual({
-        avo: json.avo,
-        schema: { id: 'schema-1', name: 'Test Workspace' },
-        branch: { id: 'master', name: 'main' },
-        libraryInterfaceFileFilter: 'all',
-      });
-    });
-
-    it('never reads stdin without a TTY, and omits the key entirely', async () => {
-      const promptFn = jest.fn();
-      const reportInfo = jest.fn();
-      process.stdin.isTTY = false;
-
-      const json: any = await init(undefined, {
-        fetchWorkspaces: fetchWorkspaces(workspace),
-        promptFn: promptFn as any,
-        reportInfo,
-      });
-
-      expect(promptFn).not.toHaveBeenCalled();
       expect('libraryInterfaceFileFilter' in json).toBe(false);
-      expect(reportInfo).toHaveBeenCalledTimes(1);
-    });
-
-    it('never reads stdin when CI is set, using the existing invokedByCi model', async () => {
-      const promptFn = jest.fn();
-      const reportInfo = jest.fn();
-      process.env.CI = 'true';
-      process.stdin.isTTY = true;
-
-      const json: any = await init(undefined, {
-        fetchWorkspaces: fetchWorkspaces(workspace),
-        promptFn: promptFn as any,
-        reportInfo,
-      });
-
-      expect(promptFn).not.toHaveBeenCalled();
-      expect('libraryInterfaceFileFilter' in json).toBe(false);
-      expect(reportInfo).toHaveBeenCalledTimes(1);
-    });
-
-    it('pre-answers the filter but still asks for the module when the filter is not all', async () => {
-      const promptFn = jest.fn(async (questions: any) => {
-        expect(questions[0].name).toBe('libraryInterfaceSharedModule');
-        return { libraryInterfaceSharedModule: '@acme/analytics' };
-      });
-      process.stdin.isTTY = true;
-
-      const json: any = await init('events-only', {
-        fetchWorkspaces: fetchWorkspaces(workspace),
-        promptFn: promptFn as any,
-      });
-
-      expect(promptFn).toHaveBeenCalledTimes(1);
-      expect(json.libraryInterfaceFileFilter).toBe('events-only');
-      expect(json.libraryInterfaceSharedModule).toBe('@acme/analytics');
-    });
-
-    it('pre-answers both without prompting', async () => {
-      const promptFn = jest.fn();
-      process.stdin.isTTY = true;
-
-      const json: any = await init('events-only', {
-        fetchWorkspaces: fetchWorkspaces(workspace),
-        promptFn: promptFn as any,
-        libraryInterfaceSharedModulePreAnswer: '@acme/analytics',
-      });
-
-      expect(promptFn).not.toHaveBeenCalled();
-      expect(json.libraryInterfaceFileFilter).toBe('events-only');
-      expect(json.libraryInterfaceSharedModule).toBe('@acme/analytics');
+      expect('libraryInterfaceSharedModule' in json).toBe(false);
     });
   });
 
@@ -1383,16 +1138,16 @@ describe('avo init and libraryInterfaceFileFilter', () => {
     it('completes in CI without prompting when avo.json is missing', async () => {
       const promptFn = jest.fn();
       process.env.CI = 'true';
-      process.stdin.isTTY = true;
 
       const json: any = await loadAvoJsonOrInit({
         argv: { token: 'test-token' },
         skipInit: false,
         skipPullMaster: false,
         initFn: () =>
-          init(undefined, {
+          init({
             fetchWorkspaces: fetchWorkspaces(workspace),
             promptFn: promptFn as any,
+            reportInfo: () => {},
           }),
       });
 

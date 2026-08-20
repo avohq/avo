@@ -752,125 +752,22 @@ export function buildLibraryInterfaceFileFilterInfoLine(): string {
   )} to the module your event files import the shared interface from`;
 }
 
-export function buildLibraryInterfaceSharedModulePrompt() {
-  return {
-    type: 'input',
-    name: 'libraryInterfaceSharedModule',
-    message:
-      'Which module should the generated event files import the shared library interface from?\n' +
-      '(A Kotlin package or a TypeScript module specifier, used verbatim. Leave empty to set it later in avo.json)',
-    default: '',
-  };
-}
-
-export function buildLibraryInterfaceFileFilterPrompt() {
-  return {
-    type: 'list',
-    name: 'libraryInterfaceFileFilter',
-    message:
-      "Which files should 'avo pull' generate in this folder?\n" +
-      '(Only applies to sources using a library interface — every other source is unaffected)',
-    default: 'all',
-    choices: [
-      {
-        value: 'interface-only',
-        name: 'interface-only — only the shared library interface file',
-      },
-      {
-        value: 'events-only',
-        name: 'events-only — only the event files; the library interface is consumed from elsewhere',
-      },
-      {
-        value: 'all',
-        name: 'all — the library interface and the event files (default, unchanged behaviour)',
-      },
-    ],
-  };
-}
-
 type InitPromptAnswers = {
   schema?: { id: string; name: string };
-  libraryInterfaceFileFilter?: LibraryInterfaceFileFilter;
-  libraryInterfaceSharedModule?: string;
 };
 
 type InitDeps = {
   fetchWorkspaces?: () => Promise<ApiWorkspacesResult>;
   promptFn?: (questions: unknown) => Promise<InitPromptAnswers>;
-  isTTY?: boolean;
-  isCi?: boolean;
   reportInfo?: (text: string) => void;
-  libraryInterfaceSharedModulePreAnswer?: string;
 };
 
-// Asked only where a human can answer: init() is reached implicitly from pull,
-// checkout and merge, so prompting without a terminal would turn a working
-// scripted pull into one that blocks forever.
-export function resolveInitLibraryInterfaceFileFilter({
-  preAnswer,
-  isTTY = Boolean(process.stdin.isTTY),
-  isCi = invokedByCi(),
-  promptFn = inquirer.prompt,
-  reportInfo = report.info,
-}: {
-  preAnswer?: LibraryInterfaceFileFilter;
-} & InitDeps = {}): Promise<LibraryInterfaceFileFilter | undefined> {
-  if (preAnswer !== undefined) {
-    return Promise.resolve(parseLibraryInterfaceFileFilter(preAnswer));
-  }
-
-  if (!isTTY || isCi) {
-    reportInfo(buildLibraryInterfaceFileFilterInfoLine());
-    return Promise.resolve(undefined);
-  }
-
-  return promptFn([buildLibraryInterfaceFileFilterPrompt()]).then(
-    (answer) => answer.libraryInterfaceFileFilter,
-  );
-}
-
-// Gated on the filter the user just chose: under 'all' nothing reads the handle,
-// so asking for it would be a question with no consequence. An explicit
-// --libraryInterfaceSharedModule is honoured regardless of the filter, because
-// setting the module before flipping the filter is a supported order and is inert
-// until the filter changes.
-export function resolveInitLibraryInterfaceSharedModule({
-  preAnswer,
-  libraryInterfaceFileFilter,
-  isTTY = Boolean(process.stdin.isTTY),
-  isCi = invokedByCi(),
-  promptFn = inquirer.prompt,
-}: {
-  preAnswer?: string;
-  libraryInterfaceFileFilter?: LibraryInterfaceFileFilter;
-} & InitDeps = {}): Promise<string | undefined> {
-  const omitIfBlank = (value: string | undefined) => {
-    const trimmed = (value ?? '').trim();
-    return trimmed === '' ? undefined : trimmed;
-  };
-
-  if (preAnswer !== undefined) {
-    return Promise.resolve(omitIfBlank(preAnswer));
-  }
-
-  if (
-    libraryInterfaceFileFilter === undefined ||
-    libraryInterfaceFileFilter === 'all' ||
-    !isTTY ||
-    isCi
-  ) {
-    return Promise.resolve(undefined);
-  }
-
-  return promptFn([buildLibraryInterfaceSharedModulePrompt()]).then((answer) =>
-    omitIfBlank(answer.libraryInterfaceSharedModule),
-  );
-}
-
-export function init(
-  libraryInterfaceFileFilterPreAnswer?: LibraryInterfaceFileFilter,
-  deps: InitDeps = {},
-): Promise<AvoJson> {
+// libraryInterfaceFileFilter / libraryInterfaceSharedModule are an advanced,
+// rarely-used setup, so init does NOT prompt for them — that would tax every
+// user for a feature few reach. init leaves both keys absent (absent means the
+// default, 'all') and prints one discoverability line naming them; the way to
+// enable the feature is to edit avo.json directly.
+export function init(deps: InitDeps = {}): Promise<AvoJson> {
   const promptFn = deps.promptFn ?? inquirer.prompt;
   const fetchWorkspaces =
     deps.fetchWorkspaces ??
@@ -882,50 +779,28 @@ export function init(
 
   // Placed inside makeAvoJson so it fires on BOTH return paths — the
   // single-workspace branch never reaches the workspace picker.
+  const reportInfo = deps.reportInfo ?? report.info;
+
   const makeAvoJson = (schema: {
     id: string;
     name: string;
   }): Promise<AvoJson> => {
     report.success(`Initialized for workspace ${cyan(schema.name)}`);
+    reportInfo(buildLibraryInterfaceFileFilterInfoLine());
 
-    return resolveInitLibraryInterfaceFileFilter({
-      preAnswer: libraryInterfaceFileFilterPreAnswer,
-      isTTY: deps.isTTY,
-      isCi: deps.isCi,
-      promptFn,
-      reportInfo: deps.reportInfo,
-    })
-      .then((libraryInterfaceFileFilter) =>
-        resolveInitLibraryInterfaceSharedModule({
-          preAnswer: deps.libraryInterfaceSharedModulePreAnswer,
-          libraryInterfaceFileFilter,
-          isTTY: deps.isTTY,
-          isCi: deps.isCi,
-          promptFn,
-        }).then((libraryInterfaceSharedModule) => ({
-          libraryInterfaceFileFilter,
-          libraryInterfaceSharedModule,
-        })),
-      )
-      .then(({ libraryInterfaceFileFilter, libraryInterfaceSharedModule }) => ({
-        avo: {
-          version: semver.major(pkg.version),
-        },
-        schema: {
-          id: schema.id,
-          name: schema.name,
-        },
-        branch: {
-          id: 'master',
-          name: 'main',
-        },
-        ...(libraryInterfaceFileFilter === undefined
-          ? {}
-          : { libraryInterfaceFileFilter }),
-        ...(libraryInterfaceSharedModule === undefined
-          ? {}
-          : { libraryInterfaceSharedModule }),
-      }));
+    return Promise.resolve({
+      avo: {
+        version: semver.major(pkg.version),
+      },
+      schema: {
+        id: schema.id,
+        name: schema.name,
+      },
+      branch: {
+        id: 'master',
+        name: 'main',
+      },
+    });
   };
 
   wait('Initializing');
@@ -2619,32 +2494,7 @@ if (isMainModule) {
       .command({
         command: 'init',
         describe: 'Initialize an Avo workspace in the current folder',
-        builder: (initYargs) =>
-          initYargs
-            .option('libraryInterfaceFileFilter', {
-              describe:
-                'Which files avo pull should generate for sources using a library interface. Skips the prompt and writes the value to avo.json',
-              choices: LIBRARY_INTERFACE_FILE_FILTER_VALUES,
-              default: undefined,
-              type: 'string',
-            })
-            .option('libraryInterfaceSharedModule', {
-              describe:
-                'The module the generated event files import the shared library interface from — a Kotlin package or a TypeScript module specifier. Skips the prompt and writes the value to avo.json',
-              default: undefined,
-              type: 'string',
-            }),
         handler: (argv) => {
-          const libraryInterfaceFileFilterPreAnswer =
-            argv.libraryInterfaceFileFilter === undefined
-              ? undefined
-              : parseLibraryInterfaceFileFilter(
-                  argv.libraryInterfaceFileFilter,
-                );
-          const libraryInterfaceSharedModulePreAnswer =
-            argv.libraryInterfaceSharedModule === undefined
-              ? undefined
-              : String(argv.libraryInterfaceSharedModule);
           loadAvoJsonOrInit({ argv, skipPullMaster: false, skipInit: true })
             .then((json) => {
               if (json) {
@@ -2664,20 +2514,7 @@ if (isMainModule) {
                     json.schema.name,
                   )} (${file('avo.json')} exists)`,
                 );
-                // avo init early-returns in every already-initialised repo, so the
-                // prompt is unreachable there. Say so explicitly when a value was
-                // passed — silently discarding it while the flag's help text says it
-                // gets written to avo.json is how a user ends up believing it applied.
-                if (
-                  libraryInterfaceFileFilterPreAnswer !== undefined ||
-                  libraryInterfaceSharedModulePreAnswer !== undefined
-                ) {
-                  report.warn(
-                    `Ignoring --libraryInterfaceFileFilter/--libraryInterfaceSharedModule because ${file(
-                      'avo.json',
-                    )} already exists. Edit ${file('avo.json')} to change them.`,
-                  );
-                } else if (json.libraryInterfaceFileFilter === undefined) {
+                if (json.libraryInterfaceFileFilter === undefined) {
                   report.info(buildLibraryInterfaceFileFilterInfoLine());
                 }
                 return Promise.resolve();
@@ -2695,9 +2532,7 @@ if (isMainModule) {
                 forceFeatures: undefined,
               });
               return requireAuth(argv as any, () =>
-                init(libraryInterfaceFileFilterPreAnswer, {
-                  libraryInterfaceSharedModulePreAnswer,
-                })
+                init()
                   .then(writeAvoJson)
                   .then(() => {
                     report.info(
