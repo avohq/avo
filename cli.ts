@@ -1116,6 +1116,25 @@ export function buildResolvedAvoJson(head: AvoJson): AvoJson {
   };
 }
 
+// HEAD wins for libraryInterfaceFileFilter (buildResolvedAvoJson takes it from
+// head), so a silent divergence would leave the user on their own branch's value
+// with no signal the incoming side wanted another. This is a generation-scope
+// setting, not a structural conflict — it warns, and must NEVER reach
+// findUnresolvableAvoJsonConflict, which hard-blocks the pull.
+export function buildAvoJsonFilterMismatchWarning(
+  head: Pick<AvoJson, 'libraryInterfaceFileFilter'>,
+  incoming: Pick<AvoJson, 'libraryInterfaceFileFilter'>,
+): string | null {
+  if (head.libraryInterfaceFileFilter === incoming.libraryInterfaceFileFilter) {
+    return null;
+  }
+  return `avo.json conflict: kept libraryInterfaceFileFilter '${
+    head.libraryInterfaceFileFilter ?? 'all'
+  }' from your branch (incoming had '${
+    incoming.libraryInterfaceFileFilter ?? 'all'
+  }')`;
+}
+
 export function findUnresolvableAvoJsonConflict(
   head: AvoJson,
   incoming: AvoJson,
@@ -1168,6 +1187,14 @@ function resolveAvoJsonConflicts(
       branchName: head.branch.name,
     });
     throw new Error(unresolvableConflict);
+  }
+
+  const filterMismatchWarning = buildAvoJsonFilterMismatchWarning(
+    head,
+    incoming,
+  );
+  if (filterMismatchWarning !== null) {
+    report.warn(filterMismatchWarning);
   }
 
   const nextAvoJson = buildResolvedAvoJson(head);
@@ -1500,10 +1527,18 @@ export function codegen(
     // second source of truth that can disagree with the server's actual decision —
     // and it gets the one-run override case wrong the moment the two drift.
     // suppressedPaths is non-empty only where codegen really withheld something.
+    // Dedupe within one pull: two sources can share a shell path (multi-source
+    // client repos), and a target may repeat a path if the server ever does. The
+    // point of the warning is to tell the user to delete the file — telling them
+    // three times per pull adds noise. Warn again on the next invocation, since
+    // the user may not have acted yet.
+    const warnedThisRun = new Set<string>();
     targets.forEach((target) => {
       collectStaleSuppressedFiles(target.suppressedPaths, (suppressedPath) =>
         fs.existsSync(suppressedPath),
       ).forEach((suppressedPath) => {
+        if (warnedThisRun.has(suppressedPath)) return;
+        warnedThisRun.add(suppressedPath);
         report.warn(buildStaleSuppressedFileWarning(suppressedPath));
       });
     });
@@ -1812,31 +1847,39 @@ export function buildPullRequestBody(
 
 // Writing anything at all is gated on result.ok here: a closed branch must leave
 // avo.json and every generated file exactly as they were.
+// runCodegen and retry are typed to return `Promise<void> | void` because both
+// implementations are async — codegen resolves only once avo.json and every
+// generated file are on disk, and the retry chains checkout → pull. Discarding
+// either promise would let pull() resolve before its own writes finished, and
+// hide a codegen rejection from the pull command's own .catch analytics path
+// (rejections still surface via the unhandledRejection handler with a bare
+// process.exit(1), which loses the per-command context).
 export function applyPullResult(
   sourceFilter,
   json: AvoJson,
   result: ApiPullResult,
   libraryInterfaceFileFilterOverride?: LibraryInterfaceFileFilter,
   deps: {
-    runCodegen?: (avoJson: AvoJson, pullResult: ApiPullResult) => void;
+    runCodegen?: (
+      avoJson: AvoJson,
+      pullResult: ApiPullResult,
+    ) => Promise<void> | void;
     retry?: (
       filter,
       avoJson: AvoJson,
       override?: LibraryInterfaceFileFilter,
-    ) => void;
+    ) => Promise<void> | void;
   } = {},
-): void {
+): Promise<void> {
   const runCodegen = deps.runCodegen ?? codegen;
   const retry =
     deps.retry ??
-    ((filter, data: AvoJson, override?: LibraryInterfaceFileFilter) => {
+    ((filter, data: AvoJson, override?: LibraryInterfaceFileFilter) =>
       // eslint-disable-next-line no-use-before-define
-      checkout(null, data).then((next) => pull(filter, next, override));
-    });
+      checkout(null, data).then((next) => pull(filter, next, override)));
 
   if (result.ok) {
-    runCodegen(json, result);
-    return;
+    return Promise.resolve(runCodegen(json, result)).then(() => undefined);
   }
 
   report.error(
@@ -1845,7 +1888,9 @@ export function applyPullResult(
       new Date(result.closedAt),
     )} ago. Pick another branch.`,
   );
-  retry(sourceFilter, json, libraryInterfaceFileFilterOverride);
+  return Promise.resolve(
+    retry(sourceFilter, json, libraryInterfaceFileFilterOverride),
+  ).then(() => undefined);
 }
 
 // The per-run override is an argument rather than a field on `json` on purpose:
@@ -1884,7 +1929,7 @@ function pull(
     )
     .then((result: ApiPullResult) => {
       cancelWait();
-      applyPullResult(
+      return applyPullResult(
         sourceFilter,
         json,
         result,

@@ -21,6 +21,7 @@ import {
   buildInterfaceFilenameMessage,
   extractConflictingFiles,
   buildResolvedAvoJson,
+  buildAvoJsonFilterMismatchWarning,
   findUnresolvableAvoJsonConflict,
   LIBRARY_INTERFACE_FILE_FILTER_VALUES,
   parseLibraryInterfaceFileFilter,
@@ -538,6 +539,60 @@ describe('avo.json merge conflict resolution', () => {
         "Could not automatically resolve merge conflicts in avo.json. Resolve merge conflicts in sources list in avo.json before running 'avo pull' again.",
       );
     });
+
+    // The filter is a generation-scope setting — a mismatch is NOT a structural
+    // conflict and must never hard-block the pull.
+    it('does NOT bail on a libraryInterfaceFileFilter mismatch', () => {
+      const [head, incoming] = parseConflictSides(conflictedAvoJson);
+      incoming.libraryInterfaceFileFilter = 'interface-only';
+      expect(head.libraryInterfaceFileFilter).toBe('events-only');
+
+      expect(findUnresolvableAvoJsonConflict(head, incoming)).toBeNull();
+    });
+  });
+
+  describe('buildAvoJsonFilterMismatchWarning', () => {
+    it('returns null when both sides agree', () => {
+      expect(
+        buildAvoJsonFilterMismatchWarning(
+          { libraryInterfaceFileFilter: 'events-only' },
+          { libraryInterfaceFileFilter: 'events-only' },
+        ),
+      ).toBeNull();
+    });
+
+    // Both undefined counts as agreement — neither branch set the key.
+    it('returns null when both sides are unset', () => {
+      expect(buildAvoJsonFilterMismatchWarning({}, {})).toBeNull();
+    });
+
+    it('names the kept HEAD value and the discarded incoming value', () => {
+      const message = buildAvoJsonFilterMismatchWarning(
+        { libraryInterfaceFileFilter: 'events-only' },
+        { libraryInterfaceFileFilter: 'interface-only' },
+      );
+
+      expect(message).toContain("kept libraryInterfaceFileFilter 'events-only'");
+      expect(message).toContain("incoming had 'interface-only'");
+    });
+
+    // Absent on either side means 'all' at generation time, so the warning must
+    // display 'all' rather than 'undefined' when a side has no key.
+    it("labels an absent side as 'all'", () => {
+      const missingHead = buildAvoJsonFilterMismatchWarning(
+        {},
+        { libraryInterfaceFileFilter: 'events-only' },
+      );
+      expect(missingHead).toContain("kept libraryInterfaceFileFilter 'all'");
+      expect(missingHead).toContain("incoming had 'events-only'");
+
+      const missingIncoming = buildAvoJsonFilterMismatchWarning(
+        { libraryInterfaceFileFilter: 'events-only' },
+        {},
+      );
+      expect(missingIncoming).toContain("kept libraryInterfaceFileFilter 'events-only'");
+      expect(missingIncoming).toContain("incoming had 'all'");
+    });
   });
 });
 
@@ -902,13 +957,13 @@ describe('libraryInterfaceFileFilter', () => {
   describe('applyPullResult', () => {
     useTempCwd();
 
-    it('runs codegen when the response is ok', () => {
+    it('runs codegen when the response is ok', async () => {
       const json: any = baseJson();
-      const runCodegen = jest.fn();
-      const retry = jest.fn();
+      const runCodegen = jest.fn<(a: any, b: any) => void>();
+      const retry = jest.fn<(a: any, b: any, c: any) => void>();
       const result: any = { ok: true, sources: [] };
 
-      applyPullResult('Web', json, result, 'events-only', {
+      await applyPullResult('Web', json, result, 'events-only', {
         runCodegen,
         retry,
       });
@@ -917,14 +972,67 @@ describe('libraryInterfaceFileFilter', () => {
       expect(retry).not.toHaveBeenCalled();
     });
 
-    it('writes nothing and forwards the override to the post-checkout retry when the branch is closed', () => {
+    // codegen resolves only once avo.json and every generated file are on disk.
+    // Discarding its promise let pull() resolve before those writes finished and
+    // hid rejections from the pull command's own .catch analytics path (they
+    // still landed on the process-wide unhandledRejection handler, but with a
+    // bare process.exit(1) that loses per-command context).
+    it("awaits an async runCodegen before resolving", async () => {
+      const json: any = baseJson();
+      let resolved = false;
+      let releaseCodegen: () => void = () => {};
+      const codegenDone = new Promise<void>((resolve) => {
+        releaseCodegen = resolve;
+      });
+      const runCodegen = jest.fn(() =>
+        codegenDone.then(() => {
+          resolved = true;
+        }),
+      );
+
+      const applyPromise = applyPullResult(
+        'Web',
+        json,
+        { ok: true, sources: [] } as any,
+        undefined,
+        { runCodegen },
+      );
+
+      // A microtask turn — enough for a discarded promise's caller to resolve.
+      await Promise.resolve();
+      expect(resolved).toBe(false);
+
+      releaseCodegen();
+      await applyPromise;
+
+      expect(resolved).toBe(true);
+    });
+
+    it('surfaces a runCodegen rejection to the caller', async () => {
+      const json: any = baseJson();
+      const runCodegen = jest.fn(() =>
+        Promise.reject(new Error('codegen failed to write avo.json')),
+      );
+
+      await expect(
+        applyPullResult(
+          'Web',
+          json,
+          { ok: true, sources: [] } as any,
+          undefined,
+          { runCodegen },
+        ),
+      ).rejects.toThrow('codegen failed to write avo.json');
+    });
+
+    it('writes nothing and forwards the override to the post-checkout retry when the branch is closed', async () => {
       const json: any = baseJson();
       json.libraryInterfaceFileFilter = 'events-only';
       fs.writeFileSync('avo.json', JSON.stringify(json, null, 2));
       const before = fs.readFileSync('avo.json', 'utf8');
-      const retry = jest.fn();
+      const retry = jest.fn<(a: any, b: any, c: any) => void>();
 
-      applyPullResult(
+      await applyPullResult(
         'Web',
         json,
         {
@@ -1480,6 +1588,42 @@ describe('stale files from a previous filter', () => {
       expect(warnings).toHaveLength(2);
       expect(warnings[0]).toContain('src/AvoConfig.ts');
       expect(warnings[1]).toContain('src/Avo.ts');
+    });
+
+    // Two targets pointing at the same shell path is the multi-source client-repo
+    // shape (Web + Node both consuming ./shell/AvoLibrary.ts). Warning three times
+    // per pull would be noise; the user can only delete each file once.
+    it('warns once per stale path even if multiple targets reference it', async () => {
+      fs.mkdirSync('src', { recursive: true });
+      fs.writeFileSync('src/AvoLibrary.ts', '// stale shared interface');
+
+      const multiSourceJson = jsonWith('events-only');
+      multiSourceJson.sources.push({
+        ...multiSourceJson.sources[0],
+        id: 'source-2',
+        name: 'Node',
+        path: 'src/AvoNode.ts',
+        interfacePath: 'src/AvoNode.ts',
+      });
+
+      await codegen(multiSourceJson, {
+        schema: { id: 'schema-1', name: 'Test Workspace' },
+        sources: [
+          target({ suppressedPaths: ['src/AvoLibrary.ts'] }),
+          target({
+            id: 'source-2',
+            code: [{ path: 'src/AvoNodeEvents/eventClicked.ts', content: '// event' }],
+            suppressedPaths: ['src/AvoLibrary.ts'],
+          }),
+        ],
+        warnings: [],
+        success: [],
+        errors: '',
+      } as any);
+
+      const warnings = staleWarnings();
+      expect(warnings).toHaveLength(1);
+      expect(warnings[0]).toContain('src/AvoLibrary.ts');
     });
 
     it('leaves the per-event directory intact under interface-only', async () => {
