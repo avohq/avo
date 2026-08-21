@@ -346,7 +346,12 @@ type ReqOptions = {
 const api = {
   authOrigin: 'https://www.avo.app',
 
-  apiOrigin: 'https://api.avo.app',
+  // Override to run against a local emulator. The reverse proxy in
+  // infrastructure/api-reverse-proxy listens on 3333 and forwards /c/v1/* to the
+  // functions emulator on 5001, so AVO_API_ORIGIN=http://127.0.0.1:3333 is the
+  // whole local setup. Auth still goes to authOrigin above, on purpose: tokens
+  // are issued by production and the emulator verifies them.
+  apiOrigin: process.env.AVO_API_ORIGIN ?? 'https://api.avo.app',
 
   setRefreshToken(token) {
     refreshToken = token;
@@ -466,6 +471,15 @@ type Schema = {
   id: string;
   name: string;
 };
+export const LIBRARY_INTERFACE_FILE_FILTER_VALUES = [
+  'interface-only',
+  'events-only',
+  'all',
+] as const;
+
+type LibraryInterfaceFileFilter =
+  (typeof LIBRARY_INTERFACE_FILE_FILTER_VALUES)[number];
+
 type Source = {
   id: string;
   name: string;
@@ -474,6 +488,12 @@ type Source = {
   branchId: string;
   updatedAt: string;
   interfacePath?: string;
+  libraryInterfaceFileFilter?: LibraryInterfaceFileFilter;
+  // The module this source's event files import the SHARED library interface from
+  // — a Kotlin package or a TypeScript module specifier, consumed verbatim
+  // server-side. Distinct from interfacePath above, which names this source's own
+  // classic-split base file.
+  libraryInterfaceSharedModule?: string;
   analysis?: {
     glob: string;
     module?: string;
@@ -490,8 +510,59 @@ type AvoJson = {
   branch: Branch;
   force?: boolean;
   forceFeatures?: string;
+  libraryInterfaceFileFilter?: LibraryInterfaceFileFilter;
+  libraryInterfaceSharedModule?: string;
   sources?: Source[];
 };
+
+export function parseLibraryInterfaceFileFilter(
+  value: unknown,
+  context = '',
+): LibraryInterfaceFileFilter {
+  if (
+    LIBRARY_INTERFACE_FILE_FILTER_VALUES.includes(
+      value as LibraryInterfaceFileFilter,
+    )
+  ) {
+    return value as LibraryInterfaceFileFilter;
+  }
+  throw new AvoError(
+    `Invalid libraryInterfaceFileFilter '${value}'${context} — must be one of ${LIBRARY_INTERFACE_FILE_FILTER_VALUES.join(
+      ', ',
+    )}`,
+  );
+}
+
+export function resolveLibraryInterfaceFileFilter({
+  flag,
+  source,
+  json,
+}: {
+  flag?: LibraryInterfaceFileFilter;
+  source: Pick<Source, 'libraryInterfaceFileFilter'>;
+  json: Pick<AvoJson, 'libraryInterfaceFileFilter'>;
+}): LibraryInterfaceFileFilter {
+  return (
+    flag ??
+    source.libraryInterfaceFileFilter ??
+    json.libraryInterfaceFileFilter ??
+    'all'
+  );
+}
+
+// No flag arm and no default: the handle is a value the server consumes verbatim,
+// so "unset" has to stay distinguishable from every string a user could pick.
+export function resolveLibraryInterfaceSharedModule({
+  source,
+  json,
+}: {
+  source: Pick<Source, 'libraryInterfaceSharedModule'>;
+  json: Pick<AvoJson, 'libraryInterfaceSharedModule'>;
+}): string | undefined {
+  return (
+    source.libraryInterfaceSharedModule ?? json.libraryInterfaceSharedModule
+  );
+}
 
 function isLegacyAvoJson(json): boolean {
   // check if legacy avo.json or un-initialized project
@@ -517,7 +588,7 @@ function hasMergeConflicts(str: string): boolean {
   );
 }
 
-function extractConflictingFiles(str: string): [string, string] {
+export function extractConflictingFiles(str: string): [string, string] {
   const files = [[], []];
   const lines = str.split(/\r?\n/g);
   let skip = false;
@@ -674,12 +745,53 @@ type ApiWorkspacesResult = {
   workspaces: [{ lastUsedAt: number; name: string; id: string }];
 };
 
-function init(): Promise<AvoJson> {
+export function buildLibraryInterfaceFileFilterInfoLine(): string {
+  return `Set ${bold('libraryInterfaceFileFilter')} in ${file(
+    'avo.json',
+  )} to choose which files ${cmd(
+    'avo pull',
+  )} generates for sources using a library interface: ${LIBRARY_INTERFACE_FILE_FILTER_VALUES.join(
+    ', ',
+  )} (defaults to all). When it is not ${bold('all')}, set ${bold(
+    'libraryInterfaceSharedModule',
+  )} to the module your event files import the shared interface from`;
+}
+
+type InitPromptAnswers = {
+  schema?: { id: string; name: string };
+};
+
+type InitDeps = {
+  fetchWorkspaces?: () => Promise<ApiWorkspacesResult>;
+  promptFn?: (questions: unknown) => Promise<InitPromptAnswers>;
+  reportInfo?: (text: string) => void;
+};
+
+// libraryInterfaceFileFilter / libraryInterfaceSharedModule are an advanced,
+// rarely-used setup, so init does NOT prompt for them — that would tax every
+// user for a feature few reach. init leaves both keys absent (absent means the
+// default, 'all') and prints one discoverability line naming them; the way to
+// enable the feature is to edit avo.json directly.
+export function init(deps: InitDeps = {}): Promise<AvoJson> {
+  const promptFn = deps.promptFn ?? inquirer.prompt;
+  const fetchWorkspaces =
+    deps.fetchWorkspaces ??
+    (() =>
+      api.request('GET', '/c/v1/workspaces', {
+        origin: api.apiOrigin,
+        auth: true,
+      }));
+
+  // Placed inside makeAvoJson so it fires on BOTH return paths — the
+  // single-workspace branch never reaches the workspace picker.
+  const reportInfo = deps.reportInfo ?? report.info;
+
   const makeAvoJson = (schema: {
     id: string;
     name: string;
   }): Promise<AvoJson> => {
     report.success(`Initialized for workspace ${cyan(schema.name)}`);
+    reportInfo(buildLibraryInterfaceFileFilterInfoLine());
 
     return Promise.resolve({
       avo: {
@@ -698,46 +810,37 @@ function init(): Promise<AvoJson> {
 
   wait('Initializing');
 
-  return api
-    .request('GET', '/c/v1/workspaces', {
-      origin: api.apiOrigin,
-      auth: true,
-    })
-    .then(({ workspaces }: ApiWorkspacesResult) => {
-      cancelWait();
-      const schemas = [...workspaces].sort(
-        (a, b) => a.lastUsedAt - b.lastUsedAt,
+  return fetchWorkspaces().then(({ workspaces }: ApiWorkspacesResult) => {
+    cancelWait();
+    const schemas = [...workspaces].sort((a, b) => a.lastUsedAt - b.lastUsedAt);
+    if (schemas.length > 1) {
+      const choices = schemas.map((schema) => ({
+        value: schema,
+        name: schema.name,
+      }));
+      return promptFn([
+        {
+          type: 'list',
+          name: 'schema',
+          message: 'Select a workspace to initialize',
+          choices,
+        },
+      ]).then((answer) => makeAvoJson(answer.schema));
+    }
+    if (schemas.length === 0) {
+      throw new AvoError(
+        `No workspaces to initialize. Go to ${link(
+          'wwww.avo.app',
+        )} to create one`,
       );
-      if (schemas.length > 1) {
-        const choices = schemas.map((schema) => ({
-          value: schema,
-          name: schema.name,
-        }));
-        return inquirer
-          .prompt([
-            {
-              type: 'list',
-              name: 'schema',
-              message: 'Select a workspace to initialize',
-              choices,
-            },
-          ])
-          .then((answer) => makeAvoJson(answer.schema));
-      }
-      if (schemas.length === 0) {
-        throw new AvoError(
-          `No workspaces to initialize. Go to ${link(
-            'wwww.avo.app',
-          )} to create one`,
-        );
-      } else {
-        const schema = schemas[0];
-        return makeAvoJson(schema);
-      }
-    });
+    } else {
+      const schema = schemas[0];
+      return makeAvoJson(schema);
+    }
+  });
 }
 
-function validateAvoJson(json: AvoJson): Promise<AvoJson> {
+export function validateAvoJson(json: AvoJson): Promise<AvoJson> {
   if (avoNeedsUpdate(json)) {
     throw new AvoError('Your avo CLI is outdated, please update');
   }
@@ -745,6 +848,23 @@ function validateAvoJson(json: AvoJson): Promise<AvoJson> {
   if (isLegacyAvoJson(json)) {
     return init();
   }
+
+  // Validated here rather than on the pull path so a malformed persisted value is
+  // reported by every command that loads avo.json, not only by 'avo pull'.
+  if (json.libraryInterfaceFileFilter !== undefined) {
+    parseLibraryInterfaceFileFilter(
+      json.libraryInterfaceFileFilter,
+      ` in ${file('avo.json')}`,
+    );
+  }
+  (json.sources ?? []).forEach((source) => {
+    if (source.libraryInterfaceFileFilter !== undefined) {
+      parseLibraryInterfaceFileFilter(
+        source.libraryInterfaceFileFilter,
+        ` on source '${source.name}' in ${file('avo.json')}`,
+      );
+    }
+  });
 
   // augment the latest major version into avo.json
   return Promise.resolve({
@@ -783,6 +903,18 @@ function fetchBranches(json: AvoJson): Promise<Branch[]> {
     });
 }
 
+// Spreads the whole json so top-level state the CLI does not know about — the
+// persisted libraryInterfaceFileFilter among it — survives a branch switch.
+export function applyBranchToAvoJson(json: AvoJson, branch: Branch): AvoJson {
+  return {
+    ...json,
+    branch: {
+      id: branch.id,
+      name: branch.name,
+    },
+  };
+}
+
 function checkout(branchToCheckout: string, json: AvoJson): Promise<AvoJson> {
   return fetchBranches(json).then((branches) => {
     if (!branchToCheckout) {
@@ -810,13 +942,7 @@ function checkout(branchToCheckout: string, json: AvoJson): Promise<AvoJson> {
           }
           const { branch } = answer;
           report.success(`Switched to branch '${branch.name}'`);
-          return {
-            ...json,
-            branch: {
-              id: branch.id,
-              name: branch.name,
-            },
-          };
+          return applyBranchToAvoJson(json, branch);
         });
     }
     if (branchToCheckout === 'master') {
@@ -845,14 +971,71 @@ function checkout(branchToCheckout: string, json: AvoJson): Promise<AvoJson> {
     }
 
     report.success(`Switched to branch '${branch.name}'`);
-    return {
-      ...json,
-      branch: {
-        id: branch.id,
-        name: branch.name,
-      },
-    };
+    return applyBranchToAvoJson(json, branch);
   });
+}
+
+// Spreads HEAD before the explicit keys so top-level avo.json state this CLI does not
+// know about survives conflict resolution — the result is written straight to disk, so
+// rebuilding from a fixed key list drops the unknown keys permanently.
+//
+// force/forceFeatures are excluded because they are per-invocation flags, not
+// settings: loadAvoJsonOrInit stamps them into the in-memory json and codegen
+// persists it, so any repo that has ever run `avo pull -f` carries `"force": true`
+// in git. Spreading that back out of conflict resolution would hand it to the
+// follow-up main-pull, which force-merges past merge warnings and discards
+// changes to items archived on main — without ever prompting.
+export function buildResolvedAvoJson(head: AvoJson): AvoJson {
+  const { force, forceFeatures, ...rest } = head;
+  return {
+    ...rest,
+    avo: head.avo,
+    schema: head.schema,
+    branch: head.branch,
+    sources: head.sources,
+  };
+}
+
+// HEAD wins for libraryInterfaceFileFilter (buildResolvedAvoJson takes it from
+// head), so a silent divergence would leave the user on their own branch's value
+// with no signal the incoming side wanted another. This is a generation-scope
+// setting, not a structural conflict — it warns, and must NEVER reach
+// findUnresolvableAvoJsonConflict, which hard-blocks the pull.
+export function buildAvoJsonFilterMismatchWarning(
+  head: Pick<AvoJson, 'libraryInterfaceFileFilter'>,
+  incoming: Pick<AvoJson, 'libraryInterfaceFileFilter'>,
+): string | null {
+  if (head.libraryInterfaceFileFilter === incoming.libraryInterfaceFileFilter) {
+    return null;
+  }
+  return `avo.json conflict: kept libraryInterfaceFileFilter '${
+    head.libraryInterfaceFileFilter ?? 'all'
+  }' from your branch (incoming had '${
+    incoming.libraryInterfaceFileFilter ?? 'all'
+  }')`;
+}
+
+export function findUnresolvableAvoJsonConflict(
+  head: AvoJson,
+  incoming: AvoJson,
+): string | null {
+  if (
+    head.avo.version !== incoming.avo.version ||
+    head.schema.id !== incoming.schema.id
+  ) {
+    return "Could not automatically resolve merge conflicts in avo.json. Resolve merge conflicts in avo.json before running 'avo pull' again.";
+  }
+
+  // sources is optional on AvoJson: an initialised repo that has not added a source
+  // yet has no key at all, and mapping over it directly throws instead of resolving.
+  if (
+    JSON.stringify((head.sources ?? []).map((s) => s.id)) !==
+    JSON.stringify((incoming.sources ?? []).map((s) => s.id))
+  ) {
+    return "Could not automatically resolve merge conflicts in avo.json. Resolve merge conflicts in sources list in avo.json before running 'avo pull' again.";
+  }
+
+  return null;
 }
 
 function resolveAvoJsonConflicts(
@@ -873,10 +1056,8 @@ function resolveAvoJsonConflicts(
     branchName: head.branch.name,
   });
 
-  if (
-    head.avo.version !== incoming.avo.version ||
-    head.schema.id !== incoming.schema.id
-  ) {
+  const unresolvableConflict = findUnresolvableAvoJsonConflict(head, incoming);
+  if (unresolvableConflict !== null) {
     Avo.cliConflictResolveFailed({
       userId_: installIdOrUserId(),
       cliInvokedByCi: invokedByCi(),
@@ -885,34 +1066,18 @@ function resolveAvoJsonConflicts(
       branchId: head.branch.id,
       branchName: head.branch.name,
     });
-    throw new Error(
-      "Could not automatically resolve merge conflicts in avo.json. Resolve merge conflicts in avo.json before running 'avo pull' again.",
-    );
+    throw new Error(unresolvableConflict);
   }
 
-  if (
-    JSON.stringify(head.sources.map((s) => s.id)) !==
-    JSON.stringify(incoming.sources.map((s) => s.id))
-  ) {
-    Avo.cliConflictResolveFailed({
-      userId_: installIdOrUserId(),
-      cliInvokedByCi: invokedByCi(),
-      schemaId: head.schema.id,
-      schemaName: head.schema.name,
-      branchId: head.branch.id,
-      branchName: head.branch.name,
-    });
-    throw new Error(
-      "Could not automatically resolve merge conflicts in avo.json. Resolve merge conflicts in sources list in avo.json before running 'avo pull' again.",
-    );
+  const filterMismatchWarning = buildAvoJsonFilterMismatchWarning(
+    head,
+    incoming,
+  );
+  if (filterMismatchWarning !== null) {
+    report.warn(filterMismatchWarning);
   }
 
-  const nextAvoJson = {
-    avo: head.avo,
-    schema: head.schema,
-    branch: head.branch,
-    sources: head.sources,
-  };
+  const nextAvoJson = buildResolvedAvoJson(head);
 
   return requireAuth(argv, () =>
     fetchBranches(nextAvoJson).then((branches) => {
@@ -997,7 +1162,7 @@ function resolveAvoJsonConflicts(
   );
 }
 
-function loadAvoJson(): Promise<AvoJson> {
+export function loadAvoJson(): Promise<AvoJson> {
   return loadJsonFile('avo.json')
     .then(validateAvoJson)
     .catch((err) => {
@@ -1011,10 +1176,11 @@ function loadAvoJson(): Promise<AvoJson> {
     });
 }
 
-function loadAvoJsonOrInit({
+export function loadAvoJsonOrInit({
   argv,
   skipPullMaster,
   skipInit,
+  initFn = init,
 }): Promise<AvoJson> {
   return pify(fs.readFile)('avo.json', 'utf8')
     .then((avoFile) => {
@@ -1041,7 +1207,7 @@ function loadAvoJsonOrInit({
 
       if (error.code === 'ENOENT') {
         report.info('Avo not initialized');
-        return requireAuth(argv, init);
+        return requireAuth(argv, initFn);
       }
 
       throw error;
@@ -1053,6 +1219,18 @@ function writeAvoJson(json: AvoJson): Promise<AvoJson> {
     indent: 2,
   }).then(() => json);
 }
+
+type ApiPullTarget = {
+  id: string;
+  actionId: string;
+  name: string;
+  branchId: string;
+  updatedAt: string;
+  code: { path: string; content: string }[];
+  // Paths codegen filtered out for this source. Optional in both directions: an
+  // older codegen simply sends none and the CLI warns about nothing.
+  suppressedPaths?: string[];
+};
 
 // Helper function to map targets to sources and filter out nulls
 function mapTargetsToSources<
@@ -1074,9 +1252,44 @@ function mapTargetsToSources<
     );
 }
 
-function codegen(
+// Warn, never delete: this feature exists to stop codegen touching files it does
+// not own, and removing a file the CLI did not create is the same mistake with the
+// sign flipped. The paths come from the response — the CLI derives none of them.
+export function collectStaleSuppressedFiles(
+  suppressedPaths: string[] | undefined,
+  exists: (suppressedPath: string) => boolean,
+): string[] {
+  return (suppressedPaths ?? []).filter((suppressedPath) =>
+    exists(suppressedPath),
+  );
+}
+
+export function buildStaleSuppressedFileWarning(
+  suppressedPath: string,
+): string {
+  // Deliberately mode-neutral: under events-only the suppressed path is the shared
+  // interface, but under interface-only it is an app/event file. Naming the wrong
+  // one would talk a user into deleting the wrong file.
+  return `[avo] Warning: ${file(
+    suppressedPath,
+  )} is no longer generated here because of the current libraryInterfaceFileFilter. It is now stale and may shadow the generated code; remove it.`;
+}
+
+export function codegen(
   json: AvoJson,
-  { schema, sources: targets, warnings, success, errors },
+  {
+    schema,
+    sources: targets,
+    warnings,
+    success,
+    errors,
+  }: {
+    schema: Schema;
+    sources: ApiPullTarget[];
+    warnings?: unknown;
+    success?: unknown;
+    errors?: unknown;
+  },
 ) {
   const newJson: AvoJson = { ...JSON.parse(JSON.stringify(json)), schema };
 
@@ -1190,6 +1403,26 @@ function codegen(
         }
       });
 
+    // Driven entirely by the response. Re-resolving the filter locally would be a
+    // second source of truth that can disagree with the server's actual decision —
+    // and it gets the one-run override case wrong the moment the two drift.
+    // suppressedPaths is non-empty only where codegen really withheld something.
+    // Dedupe within one pull: two sources can share a shell path (multi-source
+    // client repos), and a target may repeat a path if the server ever does. The
+    // point of the warning is to tell the user to delete the file — telling them
+    // three times per pull adds noise. Warn again on the next invocation, since
+    // the user may not have acted yet.
+    const warnedThisRun = new Set<string>();
+    targets.forEach((target) => {
+      collectStaleSuppressedFiles(target.suppressedPaths, (suppressedPath) =>
+        fs.existsSync(suppressedPath),
+      ).forEach((suppressedPath) => {
+        if (warnedThisRun.has(suppressedPath)) return;
+        warnedThisRun.add(suppressedPath);
+        report.warn(buildStaleSuppressedFileWarning(suppressedPath));
+      });
+    });
+
     if (errors !== undefined && errors !== null && errors !== '') {
       report.warn(`${errors}\n`);
     }
@@ -1255,21 +1488,40 @@ export function buildFolderMessage(source: {
   return `${folderDescription}\n(e.g. ${examplePath})`;
 }
 
-export function buildInterfaceFolderMessage(source: {
-  outputDirExample?: string;
-}): string {
-  const examplePath = source.outputDirExample ?? 'src/analytics';
-  const interfaceFolderDescription =
-    'Generated interface file — place it inside your source tree';
-  return `${interfaceFolderDescription}\n(e.g. ${examplePath})`;
-}
-
 export function buildFilenameMessage(): string {
   return "This file is regenerated on every 'avo pull' — do not edit it manually";
 }
 
 export function buildInterfaceFilenameMessage(): string {
   return "This file is regenerated on every 'avo pull' — do not edit it manually";
+}
+
+// A source that splits into an events file and an interface file still gets one
+// folder: both files are generated side by side in it, and only the filenames
+// differ. Asking for a second folder implied the two could be separated, which
+// the generator does not support.
+export function buildSourcePaths(
+  answer: { folder: string; filename: string },
+  moreAnswers: { interfaceFilename?: string },
+  cwd: string = process.cwd(),
+): { path: string; interfacePath: string } {
+  const folder = path.resolve(cwd, answer.folder);
+  const relativeMainPath = path.relative(
+    cwd,
+    path.join(folder, answer.filename),
+  );
+  // Sources that cannot split have no interface filename, so both keys point at
+  // the single generated file.
+  if (moreAnswers.interfaceFilename == null) {
+    return { path: relativeMainPath, interfacePath: relativeMainPath };
+  }
+  return {
+    path: relativeMainPath,
+    interfacePath: path.relative(
+      cwd,
+      path.join(folder, moreAnswers.interfaceFilename),
+    ),
+  };
 }
 
 function selectSource(sourceToAdd: string, json: AvoJson) {
@@ -1371,19 +1623,6 @@ function selectSource(sourceToAdd: string, json: AvoJson) {
           answerSource.canHaveInterfaceFile === true
             ? [
                 {
-                  type: 'fuzzypath',
-                  name: 'folder',
-                  excludePath: (maybeExcludePath) =>
-                    maybeExcludePath.startsWith('node_modules') ||
-                    maybeExcludePath.startsWith('.git'),
-                  itemType: 'directory',
-                  rootPath: '.',
-                  message: buildInterfaceFolderMessage(answerSource),
-                  default: '.',
-                  suggestOnly: false,
-                  depthLimit: 10,
-                },
-                {
                   type: 'input',
                   name: 'interfaceFilename',
                   message: buildInterfaceFilenameMessage(),
@@ -1398,21 +1637,8 @@ function selectSource(sourceToAdd: string, json: AvoJson) {
               ]
             : [],
         );
-        const hasMultiPath = moreAnswers.interfaceFilename != null;
-        const relativeMainPath = path.relative(
-          process.cwd(),
-          path.join(path.resolve(answer.folder), answer.filename),
-        );
-        let relativeInterfacePath = relativeMainPath;
-        if (hasMultiPath) {
-          relativeInterfacePath = path.relative(
-            process.cwd(),
-            path.join(
-              path.resolve(answer.folder),
-              moreAnswers.interfaceFilename,
-            ),
-          );
-        }
+        const { path: relativeMainPath, interfacePath: relativeInterfacePath } =
+          buildSourcePaths(answer, moreAnswers);
         let source;
         if (sourceToAdd) {
           source = sources.find((sourceToFind) =>
@@ -1448,14 +1674,106 @@ type ApiPullResult = {
   branchName: string;
   reason: string;
   closedAt: string; // Datestring
-  sources: [];
+  sources: ApiPullTarget[];
   warnings: object;
   success: object;
   errors: object;
-  schema: object;
+  schema: Schema;
 };
 
-function pull(sourceFilter, json: AvoJson): Promise<void> {
+export function buildPullRequestBody(
+  json: AvoJson,
+  sources: Source[],
+  libraryInterfaceFileFilterOverride?: LibraryInterfaceFileFilter,
+) {
+  return {
+    schemaId: json.schema.id,
+    branchId: json.branch.id,
+    sources: sources.map((source) => {
+      // Forwarded raw. The CLI has no language field, so it cannot know whether
+      // this is a Kotlin package or a TS specifier — deriving anything from it
+      // here would be guessing. Omitted rather than sent as "", because the
+      // server reads the key's presence and an empty handle would reach the
+      // generators verbatim.
+      const libraryInterfaceSharedModule = resolveLibraryInterfaceSharedModule({
+        source,
+        json,
+      });
+      return {
+        id: source.id,
+        path: source.path,
+        interfacePath: source.interfacePath,
+        libraryInterfaceFileFilter: resolveLibraryInterfaceFileFilter({
+          flag: libraryInterfaceFileFilterOverride,
+          source,
+          json,
+        }),
+        ...(libraryInterfaceSharedModule === undefined
+          ? {}
+          : { libraryInterfaceSharedModule }),
+      };
+    }),
+    force: json.force ?? false,
+    forceFeatures: json.forceFeatures,
+  };
+}
+
+// Writing anything at all is gated on result.ok here: a closed branch must leave
+// avo.json and every generated file exactly as they were.
+// runCodegen and retry are typed to return `Promise<void> | void` because both
+// implementations are async — codegen resolves only once avo.json and every
+// generated file are on disk, and the retry chains checkout → pull. Discarding
+// either promise would let pull() resolve before its own writes finished, and
+// hide a codegen rejection from the pull command's own .catch analytics path
+// (rejections still surface via the unhandledRejection handler with a bare
+// process.exit(1), which loses the per-command context).
+export function applyPullResult(
+  sourceFilter,
+  json: AvoJson,
+  result: ApiPullResult,
+  libraryInterfaceFileFilterOverride?: LibraryInterfaceFileFilter,
+  deps: {
+    runCodegen?: (
+      avoJson: AvoJson,
+      pullResult: ApiPullResult,
+    ) => Promise<void> | void;
+    retry?: (
+      filter,
+      avoJson: AvoJson,
+      override?: LibraryInterfaceFileFilter,
+    ) => Promise<void> | void;
+  } = {},
+): Promise<void> {
+  const runCodegen = deps.runCodegen ?? codegen;
+  const retry =
+    deps.retry ??
+    ((filter, data: AvoJson, override?: LibraryInterfaceFileFilter) =>
+      // eslint-disable-next-line no-use-before-define
+      checkout(null, data).then((next) => pull(filter, next, override)));
+
+  if (result.ok) {
+    return Promise.resolve(runCodegen(json, result)).then(() => undefined);
+  }
+
+  report.error(
+    `Branch ${result.branchName} was ${result.reason} ${dateFns.formatDistance(
+      new Date(),
+      new Date(result.closedAt),
+    )} ago. Pick another branch.`,
+  );
+  return Promise.resolve(
+    retry(sourceFilter, json, libraryInterfaceFileFilterOverride),
+  ).then(() => undefined);
+}
+
+// The per-run override is an argument rather than a field on `json` on purpose:
+// codegen() deep-copies the json and writes it back to avo.json, so anything
+// merged into it becomes a permanent setting (see `force`).
+function pull(
+  sourceFilter,
+  json: AvoJson,
+  libraryInterfaceFileFilterOverride?: LibraryInterfaceFileFilter,
+): Promise<void> {
   const sources = sourceFilter
     ? [json.sources.find((source) => matchesSource(source, sourceFilter))]
     : json.sources;
@@ -1475,34 +1793,21 @@ function pull(sourceFilter, json: AvoJson): Promise<void> {
       api.request('POST', '/c/v1/pull', {
         origin: api.apiOrigin,
         auth: true,
-        json: {
-          schemaId: json.schema.id,
-          branchId: json.branch.id,
-          sources: sources.map((source) => ({
-            id: source.id,
-            path: source.path,
-            interfacePath: source.interfacePath,
-          })),
-          force: json.force ?? false,
-          forceFeatures: json.forceFeatures,
-        },
+        json: buildPullRequestBody(
+          json,
+          sources,
+          libraryInterfaceFileFilterOverride,
+        ),
       }),
     )
     .then((result: ApiPullResult) => {
       cancelWait();
-      if (result.ok) {
-        codegen(json, result);
-      } else {
-        report.error(
-          `Branch ${result.branchName} was ${
-            result.reason
-          } ${dateFns.formatDistance(
-            new Date(),
-            new Date(result.closedAt),
-          )} ago. Pick another branch.`,
-        );
-        checkout(null, json).then((data) => pull(sourceFilter, data));
-      }
+      return applyPullResult(
+        sourceFilter,
+        json,
+        result,
+        libraryInterfaceFileFilterOverride,
+      );
     });
 }
 
@@ -2207,6 +2512,9 @@ if (isMainModule) {
                     json.schema.name,
                   )} (${file('avo.json')} exists)`,
                 );
+                if (json.libraryInterfaceFileFilter === undefined) {
+                  report.info(buildLibraryInterfaceFileFilterInfoLine());
+                }
                 return Promise.resolve();
               }
 
@@ -2267,8 +2575,21 @@ if (isMainModule) {
                 'Optional comma separated list of features to force enable, pass unsupported name to get the list of available features',
               default: undefined,
               type: 'string',
+            })
+            .option('libraryInterfaceFileFilter', {
+              describe:
+                'Which files codegen should emit for sources using a library interface, for this run only. Overrides the avo.json setting without changing it',
+              choices: LIBRARY_INTERFACE_FILE_FILTER_VALUES,
+              default: undefined,
+              type: 'string',
             }),
         handler: (argv) => {
+          const libraryInterfaceFileFilterOverride =
+            argv.libraryInterfaceFileFilter === undefined
+              ? undefined
+              : parseLibraryInterfaceFileFilter(
+                  argv.libraryInterfaceFileFilter,
+                );
           loadAvoJsonOrInit({ argv, skipInit: false, skipPullMaster: false })
             .then((json) => {
               Avo.cliInvoked({
@@ -2286,11 +2607,13 @@ if (isMainModule) {
                 if (argv.branch && json.branch.name !== argv.branch) {
                   return checkout(argv.branch, json)
                     .then((data) => getSource(argv, data))
-                    .then(([source, data]) => pull(source, data));
+                    .then(([source, data]) =>
+                      pull(source, data, libraryInterfaceFileFilterOverride),
+                    );
                 }
                 report.info(`Pulling from branch '${json.branch.name}'`);
                 return getSource(argv, json).then(([source, data]) =>
-                  pull(source, data),
+                  pull(source, data, libraryInterfaceFileFilterOverride),
                 );
               });
             })

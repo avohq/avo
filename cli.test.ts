@@ -1,9 +1,14 @@
-// Set test mode before importing cli to prevent yargs execution
-process.env.AVO_TEST_MODE = 'true';
-
+// AVO_TEST_MODE is set by jest.setup.js, which runs before this file is imported.
 import fs from 'fs';
 import path from 'path';
-import { describe, it, expect, beforeEach, afterEach } from '@jest/globals';
+import {
+  describe,
+  it,
+  expect,
+  beforeEach,
+  afterEach,
+  jest,
+} from '@jest/globals';
 import os from 'os';
 import {
   getEventsDirectoryPath,
@@ -11,10 +16,47 @@ import {
   eventNameToFileName,
   cleanupObsoleteEventFiles,
   buildFolderMessage,
-  buildInterfaceFolderMessage,
   buildFilenameMessage,
   buildInterfaceFilenameMessage,
+  extractConflictingFiles,
+  buildResolvedAvoJson,
+  buildAvoJsonFilterMismatchWarning,
+  findUnresolvableAvoJsonConflict,
+  LIBRARY_INTERFACE_FILE_FILTER_VALUES,
+  parseLibraryInterfaceFileFilter,
+  resolveLibraryInterfaceFileFilter,
+  resolveLibraryInterfaceSharedModule,
+  buildPullRequestBody,
+  validateAvoJson,
+  loadAvoJson,
+  loadAvoJsonOrInit,
+  applyBranchToAvoJson,
+  codegen,
+  applyPullResult,
+  buildLibraryInterfaceFileFilterInfoLine,
+  init,
+  collectStaleSuppressedFiles,
+  buildStaleSuppressedFileWarning,
+  buildSourcePaths,
 } from './cli.js';
+
+// Each of these suites runs codegen against the real filesystem, so they need an
+// isolated cwd. Declared once rather than repeated per describe block.
+const useTempCwd = (): void => {
+  let tempDir: string;
+  let previousCwd: string;
+
+  beforeEach(() => {
+    previousCwd = process.cwd();
+    tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'avo-test-'));
+    process.chdir(tempDir);
+  });
+
+  afterEach(() => {
+    process.chdir(previousCwd);
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  });
+};
 
 describe('File-per-event cleanup helper functions', () => {
   let tempDir: string;
@@ -127,7 +169,9 @@ describe('File-per-event cleanup helper functions', () => {
       cleanupObsoleteEventFiles(eventsDir, oldEvents, newEvents, extension);
 
       // Verify deleted file doesn't exist
-      expect(fs.existsSync(path.join(eventsDir, 'eventDeleted.ts'))).toBe(false);
+      expect(fs.existsSync(path.join(eventsDir, 'eventDeleted.ts'))).toBe(
+        false,
+      );
       // Verify remaining files still exist
       expect(fs.existsSync(path.join(eventsDir, 'eventClicked.ts'))).toBe(true);
       expect(fs.existsSync(path.join(eventsDir, 'eventViewed.ts'))).toBe(true);
@@ -152,7 +196,9 @@ describe('File-per-event cleanup helper functions', () => {
       cleanupObsoleteEventFiles(eventsDir, oldEvents, newEvents, extension);
 
       // Verify deleted file doesn't exist
-      expect(fs.existsSync(path.join(eventsDir, 'eventDeleted.kt'))).toBe(false);
+      expect(fs.existsSync(path.join(eventsDir, 'eventDeleted.kt'))).toBe(
+        false,
+      );
       // Verify remaining file still exists
       expect(fs.existsSync(path.join(eventsDir, 'eventClicked.kt'))).toBe(true);
     });
@@ -176,9 +222,13 @@ describe('File-per-event cleanup helper functions', () => {
       cleanupObsoleteEventFiles(eventsDir, oldEvents, newEvents, extension);
 
       // Verify deleted file doesn't exist
-      expect(fs.existsSync(path.join(eventsDir, 'eventDeleted.swift'))).toBe(false);
+      expect(fs.existsSync(path.join(eventsDir, 'eventDeleted.swift'))).toBe(
+        false,
+      );
       // Verify remaining file still exists
-      expect(fs.existsSync(path.join(eventsDir, 'eventClicked.swift'))).toBe(true);
+      expect(fs.existsSync(path.join(eventsDir, 'eventClicked.swift'))).toBe(
+        true,
+      );
     });
 
     it('should not delete files for events in both lists', () => {
@@ -246,7 +296,9 @@ describe('File-per-event cleanup helper functions', () => {
       cleanupObsoleteEventFiles(eventsDir, oldEvents, newEvents, extension);
 
       // Verify all files deleted
-      expect(fs.existsSync(path.join(eventsDir, 'eventClicked.ts'))).toBe(false);
+      expect(fs.existsSync(path.join(eventsDir, 'eventClicked.ts'))).toBe(
+        false,
+      );
       expect(fs.existsSync(path.join(eventsDir, 'eventViewed.ts'))).toBe(false);
     });
   });
@@ -281,7 +333,9 @@ describe('File-per-event cleanup helper functions', () => {
       cleanupObsoleteEventFiles(eventsDir, oldEvents, newEvents, extension);
 
       // Verify cleanup results
-      expect(fs.existsSync(path.join(eventsDir, 'eventDeleted.ts'))).toBe(false);
+      expect(fs.existsSync(path.join(eventsDir, 'eventDeleted.ts'))).toBe(
+        false,
+      );
       expect(fs.existsSync(path.join(eventsDir, 'eventClicked.ts'))).toBe(true);
       expect(fs.existsSync(path.join(eventsDir, 'eventViewed.ts'))).toBe(true);
     });
@@ -301,19 +355,7 @@ describe('Prompt message helpers', () => {
     expect(result).toContain('src/analytics');
   });
 
-  it('buildInterfaceFolderMessage includes the provided outputDirExample', () => {
-    const result = buildInterfaceFolderMessage({
-      outputDirExample: 'Sources/Analytics',
-    });
-    expect(result).toContain('Sources/Analytics');
-  });
-
-  it('buildInterfaceFolderMessage falls back to src/analytics when outputDirExample is omitted', () => {
-    const result = buildInterfaceFolderMessage({});
-    expect(result).toContain('src/analytics');
-  });
-
-  it("buildFilenameMessage mentions avo pull regeneration", () => {
+  it('buildFilenameMessage mentions avo pull regeneration', () => {
     const result = buildFilenameMessage();
     expect(result).toContain("This file is regenerated on every 'avo pull'");
   });
@@ -321,5 +363,1106 @@ describe('Prompt message helpers', () => {
   it('buildInterfaceFilenameMessage mentions avo pull regeneration', () => {
     const result = buildInterfaceFilenameMessage();
     expect(result).toContain("This file is regenerated on every 'avo pull'");
+  });
+});
+
+describe('avo.json merge conflict resolution', () => {
+  // Both the feature's own key and an UNRELATED unknown key are deliberately placed on
+  // the HEAD side of the conflict: the resolution keeps HEAD-side top-level state, so
+  // that is the only side where the drop is observable.
+  const conflictedAvoJson = [
+    '{',
+    '  "avo": { "version": 3 },',
+    '  "schema": { "id": "schema-1", "name": "Test Workspace" },',
+    '<<<<<<< HEAD',
+    '  "branch": { "id": "branch-head", "name": "head-branch" },',
+    '  "libraryInterfaceFileFilter": "events-only",',
+    '  "libraryInterfaceSharedModule": "@acme/analytics",',
+    '  "teamNote": "shared interface repo",',
+    // Committed by any repo that has ever run `avo pull -f` — this repo's own
+    // avo.json on main carries it.
+    '  "force": true,',
+    '  "forceFeatures": "AddUserPropertiesParameterInLogEvent",',
+    '=======',
+    '  "branch": { "id": "branch-incoming", "name": "incoming-branch" },',
+    '>>>>>>> incoming',
+    '  "sources": [',
+    '    {',
+    '      "id": "source-1",',
+    '      "name": "Web",',
+    '      "path": "src/Avo.ts",',
+    '      "actionId": "action-1",',
+    '      "branchId": "branch-head",',
+    '      "updatedAt": "2026-08-01T00:00:00.000Z",',
+    '      "libraryInterfaceFileFilter": "interface-only"',
+    '    }',
+    '  ]',
+    '}',
+  ].join('\n');
+
+  const parseConflictSides = (file: string) => {
+    const [headFile, incomingFile] = extractConflictingFiles(file);
+    return [JSON.parse(headFile), JSON.parse(incomingFile)];
+  };
+
+  describe('extractConflictingFiles', () => {
+    it('splits a conflicted avo.json into two parseable sides', () => {
+      const [head, incoming] = parseConflictSides(conflictedAvoJson);
+
+      expect(head.branch.id).toBe('branch-head');
+      expect(incoming.branch.id).toBe('branch-incoming');
+      expect(head.libraryInterfaceFileFilter).toBe('events-only');
+      expect(incoming.libraryInterfaceFileFilter).toBeUndefined();
+    });
+  });
+
+  describe('buildResolvedAvoJson', () => {
+    it('preserves unknown top-level state, not just the keys it knows about', () => {
+      const [head] = parseConflictSides(conflictedAvoJson);
+
+      const resolved = buildResolvedAvoJson(head) as Record<string, any>;
+
+      // The unrelated key is the real assertion: it locks the class of behaviour
+      // (unknown top-level state survives) rather than one field, so a whitelist
+      // that merely gained `libraryInterfaceFileFilter` would not satisfy it.
+      expect(resolved.teamNote).toBe('shared interface repo');
+      expect(resolved.libraryInterfaceFileFilter).toBe('events-only');
+    });
+
+    it('takes avo, schema, branch and sources from HEAD', () => {
+      const [head] = parseConflictSides(conflictedAvoJson);
+
+      const resolved = buildResolvedAvoJson(head) as Record<string, any>;
+
+      expect(resolved.avo).toEqual({ version: 3 });
+      expect(resolved.schema).toEqual({
+        id: 'schema-1',
+        name: 'Test Workspace',
+      });
+      expect(resolved.branch).toEqual({
+        id: 'branch-head',
+        name: 'head-branch',
+      });
+      expect(resolved.sources).toEqual(head.sources);
+    });
+
+    // `force` and `forceFeatures` are per-invocation flags, not settings:
+    // loadAvoJsonOrInit stamps them into the in-memory json and codegen persists
+    // it, so they end up committed. Carrying them out of conflict resolution
+    // turns the follow-up main-pull into an unprompted force-merge, which
+    // discards changes to items archived on main.
+    it('drops a committed force and forceFeatures', () => {
+      const [head] = parseConflictSides(conflictedAvoJson);
+      expect(head.force).toBe(true);
+      expect(head.forceFeatures).toBe('AddUserPropertiesParameterInLogEvent');
+
+      const resolved = buildResolvedAvoJson(head) as Record<string, any>;
+
+      expect('force' in resolved).toBe(false);
+      expect('forceFeatures' in resolved).toBe(false);
+      // Still a spread, not a whitelist: unknown state must survive alongside.
+      expect(resolved.teamNote).toBe('shared interface repo');
+    });
+
+    it('keeps a per-source key on a HEAD source', () => {
+      const [head] = parseConflictSides(conflictedAvoJson);
+
+      const resolved = buildResolvedAvoJson(head) as Record<string, any>;
+
+      expect(resolved.sources[0].libraryInterfaceFileFilter).toBe(
+        'interface-only',
+      );
+    });
+  });
+
+  describe('findUnresolvableAvoJsonConflict', () => {
+    it('returns null when the conflict is automatically resolvable', () => {
+      const [head, incoming] = parseConflictSides(conflictedAvoJson);
+
+      expect(findUnresolvableAvoJsonConflict(head, incoming)).toBeNull();
+    });
+
+    // sources is optional: an initialised repo that has not added a source yet has
+    // no key at all, and mapping over it directly threw a TypeError.
+    it('resolves when neither side has a sources key', () => {
+      const head: any = {
+        avo: { version: 2 },
+        schema: { id: 'schema-1', name: 'Test' },
+        branch: { id: 'master', name: 'main' },
+      };
+      const incoming: any = {
+        avo: { version: 2 },
+        schema: { id: 'schema-1', name: 'Test' },
+        branch: { id: 'feature', name: 'feature' },
+      };
+
+      expect(findUnresolvableAvoJsonConflict(head, incoming)).toBeNull();
+    });
+
+    it('bails out on a mismatched avo version', () => {
+      const [head, incoming] = parseConflictSides(conflictedAvoJson);
+      incoming.avo = { version: 2 };
+
+      expect(findUnresolvableAvoJsonConflict(head, incoming)).toBe(
+        "Could not automatically resolve merge conflicts in avo.json. Resolve merge conflicts in avo.json before running 'avo pull' again.",
+      );
+    });
+
+    it('bails out on a mismatched schema id', () => {
+      const [head, incoming] = parseConflictSides(conflictedAvoJson);
+      incoming.schema = { id: 'schema-2', name: 'Other Workspace' };
+
+      expect(findUnresolvableAvoJsonConflict(head, incoming)).toBe(
+        "Could not automatically resolve merge conflicts in avo.json. Resolve merge conflicts in avo.json before running 'avo pull' again.",
+      );
+    });
+
+    it('bails out on a conflicted sources list', () => {
+      const [head, incoming] = parseConflictSides(conflictedAvoJson);
+      incoming.sources = [{ ...incoming.sources[0], id: 'source-2' }];
+
+      expect(findUnresolvableAvoJsonConflict(head, incoming)).toBe(
+        "Could not automatically resolve merge conflicts in avo.json. Resolve merge conflicts in sources list in avo.json before running 'avo pull' again.",
+      );
+    });
+
+    // The filter is a generation-scope setting — a mismatch is NOT a structural
+    // conflict and must never hard-block the pull.
+    it('does NOT bail on a libraryInterfaceFileFilter mismatch', () => {
+      const [head, incoming] = parseConflictSides(conflictedAvoJson);
+      incoming.libraryInterfaceFileFilter = 'interface-only';
+      expect(head.libraryInterfaceFileFilter).toBe('events-only');
+
+      expect(findUnresolvableAvoJsonConflict(head, incoming)).toBeNull();
+    });
+  });
+
+  describe('buildAvoJsonFilterMismatchWarning', () => {
+    it('returns null when both sides agree', () => {
+      expect(
+        buildAvoJsonFilterMismatchWarning(
+          { libraryInterfaceFileFilter: 'events-only' },
+          { libraryInterfaceFileFilter: 'events-only' },
+        ),
+      ).toBeNull();
+    });
+
+    // Both undefined counts as agreement — neither branch set the key.
+    it('returns null when both sides are unset', () => {
+      expect(buildAvoJsonFilterMismatchWarning({}, {})).toBeNull();
+    });
+
+    it('names the kept HEAD value and the discarded incoming value', () => {
+      const message = buildAvoJsonFilterMismatchWarning(
+        { libraryInterfaceFileFilter: 'events-only' },
+        { libraryInterfaceFileFilter: 'interface-only' },
+      );
+
+      expect(message).toContain("kept libraryInterfaceFileFilter 'events-only'");
+      expect(message).toContain("incoming had 'interface-only'");
+    });
+
+    // Absent on either side means 'all' at generation time, so the warning must
+    // display 'all' rather than 'undefined' when a side has no key.
+    it("labels an absent side as 'all'", () => {
+      const missingHead = buildAvoJsonFilterMismatchWarning(
+        {},
+        { libraryInterfaceFileFilter: 'events-only' },
+      );
+      expect(missingHead).toContain("kept libraryInterfaceFileFilter 'all'");
+      expect(missingHead).toContain("incoming had 'events-only'");
+
+      const missingIncoming = buildAvoJsonFilterMismatchWarning(
+        { libraryInterfaceFileFilter: 'events-only' },
+        {},
+      );
+      expect(missingIncoming).toContain("kept libraryInterfaceFileFilter 'events-only'");
+      expect(missingIncoming).toContain("incoming had 'all'");
+    });
+  });
+});
+
+describe('libraryInterfaceFileFilter', () => {
+  const baseJson = () => ({
+    avo: { version: 3 },
+    schema: { id: 'schema-1', name: 'Test Workspace' },
+    branch: { id: 'master', name: 'main' },
+    sources: [
+      {
+        id: 'source-1',
+        name: 'Web',
+        path: 'src/Avo.ts',
+        interfacePath: 'src/Avo.ts',
+        actionId: 'action-1',
+        branchId: 'master',
+        updatedAt: '2026-08-01T00:00:00.000Z',
+      },
+      {
+        id: 'source-2',
+        name: 'iOS',
+        path: 'Sources/Avo.swift',
+        interfacePath: 'Sources/AvoLibraryInterface.swift',
+        actionId: 'action-2',
+        branchId: 'master',
+        updatedAt: '2026-08-01T00:00:00.000Z',
+      },
+    ],
+  });
+
+  describe('parseLibraryInterfaceFileFilter', () => {
+    it('accepts every supported value', () => {
+      expect(LIBRARY_INTERFACE_FILE_FILTER_VALUES).toEqual([
+        'interface-only',
+        'events-only',
+        'all',
+      ]);
+      LIBRARY_INTERFACE_FILE_FILTER_VALUES.forEach((value) => {
+        expect(parseLibraryInterfaceFileFilter(value)).toBe(value);
+      });
+    });
+
+    it('rejects an unsupported value with the documented message', () => {
+      expect(() => parseLibraryInterfaceFileFilter('interfaceonly')).toThrow(
+        /must be one of interface-only, events-only, all/,
+      );
+    });
+  });
+
+  describe('resolveLibraryInterfaceFileFilter', () => {
+    it('prefers the per-run flag', () => {
+      expect(
+        resolveLibraryInterfaceFileFilter({
+          flag: 'interface-only',
+          source: { libraryInterfaceFileFilter: 'events-only' },
+          json: { libraryInterfaceFileFilter: 'all' },
+        }),
+      ).toBe('interface-only');
+    });
+
+    it('falls back to the per-source override', () => {
+      expect(
+        resolveLibraryInterfaceFileFilter({
+          flag: undefined,
+          source: { libraryInterfaceFileFilter: 'events-only' },
+          json: { libraryInterfaceFileFilter: 'all' },
+        }),
+      ).toBe('events-only');
+    });
+
+    it('falls back to the top-level value', () => {
+      expect(
+        resolveLibraryInterfaceFileFilter({
+          flag: undefined,
+          source: {},
+          json: { libraryInterfaceFileFilter: 'interface-only' },
+        }),
+      ).toBe('interface-only');
+    });
+
+    it("defaults to 'all'", () => {
+      expect(
+        resolveLibraryInterfaceFileFilter({
+          flag: undefined,
+          source: {},
+          json: {},
+        }),
+      ).toBe('all');
+    });
+  });
+
+  describe('resolveLibraryInterfaceSharedModule', () => {
+    it('prefers the per-source value', () => {
+      expect(
+        resolveLibraryInterfaceSharedModule({
+          source: { libraryInterfaceSharedModule: 'com.acme.analytics' },
+          json: { libraryInterfaceSharedModule: '@acme/analytics' },
+        }),
+      ).toBe('com.acme.analytics');
+    });
+
+    it('falls back to the top-level value', () => {
+      expect(
+        resolveLibraryInterfaceSharedModule({
+          source: {},
+          json: { libraryInterfaceSharedModule: '@acme/analytics' },
+        }),
+      ).toBe('@acme/analytics');
+    });
+
+    it('is undefined when neither level sets it', () => {
+      expect(
+        resolveLibraryInterfaceSharedModule({ source: {}, json: {} }),
+      ).toBeUndefined();
+    });
+
+    // The value is a handle consumed verbatim server-side — a Kotlin package or a
+    // TS module specifier. The CLI has no language field and must derive nothing.
+    it('returns the value verbatim, whatever shape it has', () => {
+      ['../../shell/AvoLibrary', 'com.acme.analytics', '@acme/analytics'].forEach(
+        (value) => {
+          expect(
+            resolveLibraryInterfaceSharedModule({
+              source: { libraryInterfaceSharedModule: value },
+              json: {},
+            }),
+          ).toBe(value);
+        },
+      );
+    });
+  });
+
+  describe('buildPullRequestBody', () => {
+    it('resolves each source independently in one request', () => {
+      const json: any = baseJson();
+      json.libraryInterfaceFileFilter = 'events-only';
+      json.sources[0].libraryInterfaceFileFilter = 'interface-only';
+
+      const body = buildPullRequestBody(json, json.sources);
+
+      expect(body.sources[0].libraryInterfaceFileFilter).toBe('interface-only');
+      expect(body.sources[1].libraryInterfaceFileFilter).toBe('events-only');
+    });
+
+    it('sends exactly the five per-source fields', () => {
+      const json: any = baseJson();
+      json.sources[0].libraryInterfaceSharedModule = '@acme/analytics';
+
+      const body = buildPullRequestBody(json, json.sources);
+
+      expect(Object.keys(body.sources[0])).toEqual([
+        'id',
+        'path',
+        'interfacePath',
+        'libraryInterfaceFileFilter',
+        'libraryInterfaceSharedModule',
+      ]);
+      expect(body.sources[0]).toEqual({
+        id: 'source-1',
+        path: 'src/Avo.ts',
+        interfacePath: 'src/Avo.ts',
+        libraryInterfaceFileFilter: 'all',
+        libraryInterfaceSharedModule: '@acme/analytics',
+      });
+    });
+
+    // Omitted rather than sent as "" — the server reads the key's presence, and an
+    // empty string is a handle that would reach the generators verbatim.
+    it('omits libraryInterfaceSharedModule entirely when unset', () => {
+      const json: any = baseJson();
+
+      const body = buildPullRequestBody(json, json.sources);
+
+      expect(Object.keys(body.sources[0])).toEqual([
+        'id',
+        'path',
+        'interfacePath',
+        'libraryInterfaceFileFilter',
+      ]);
+      expect('libraryInterfaceSharedModule' in body.sources[0]).toBe(false);
+    });
+
+    it('forwards the module raw, with no client-side derivation', () => {
+      const json: any = baseJson();
+      // A relative TS specifier: the CLI must not resolve, normalise or re-root it.
+      json.libraryInterfaceSharedModule = '../../shell/AvoLibrary';
+      json.sources[1].libraryInterfaceSharedModule = 'com.acme.analytics';
+
+      const body = buildPullRequestBody(json, json.sources);
+
+      expect(body.sources[0].libraryInterfaceSharedModule).toBe(
+        '../../shell/AvoLibrary',
+      );
+      expect(body.sources[1].libraryInterfaceSharedModule).toBe(
+        'com.acme.analytics',
+      );
+    });
+
+    it('leaves the top-level body fields unchanged', () => {
+      const json: any = baseJson();
+      json.force = true;
+      json.forceFeatures = 'a,b';
+
+      const body = buildPullRequestBody(json, json.sources);
+
+      expect(Object.keys(body)).toEqual([
+        'schemaId',
+        'branchId',
+        'sources',
+        'force',
+        'forceFeatures',
+      ]);
+      expect(body.schemaId).toBe('schema-1');
+      expect(body.branchId).toBe('master');
+      expect(body.force).toBe(true);
+      expect(body.forceFeatures).toBe('a,b');
+    });
+
+    it('applies the per-run override to every source in the run', () => {
+      const json: any = baseJson();
+      json.libraryInterfaceFileFilter = 'events-only';
+      json.sources[0].libraryInterfaceFileFilter = 'all';
+
+      const body = buildPullRequestBody(json, json.sources, 'interface-only');
+
+      expect(
+        body.sources.map((s: any) => s.libraryInterfaceFileFilter),
+      ).toEqual(['interface-only', 'interface-only']);
+    });
+
+    it("resolves from avo.json when no override is passed, as the 'avo conflict' path does", () => {
+      const json: any = baseJson();
+      json.libraryInterfaceFileFilter = 'events-only';
+
+      const body = buildPullRequestBody(json, json.sources);
+
+      expect(
+        body.sources.map((s: any) => s.libraryInterfaceFileFilter),
+      ).toEqual(['events-only', 'events-only']);
+    });
+  });
+
+  describe('validateAvoJson rejects a malformed persisted value', () => {
+    useTempCwd();
+
+    // validateAvoJson throws synchronously, as it already does for an outdated CLI;
+    // every production call site sits inside a .then, so the throw surfaces as a
+    // rejection there — asserted by the loadAvoJson* tests below.
+    it('rejects a malformed top-level value', () => {
+      const json: any = baseJson();
+      json.libraryInterfaceFileFilter = 'interfaceonly';
+
+      expect(() => validateAvoJson(json)).toThrow(
+        /must be one of interface-only, events-only, all/,
+      );
+    });
+
+    it('rejects a malformed per-source value', () => {
+      const json: any = baseJson();
+      json.sources[1].libraryInterfaceFileFilter = 'eventsonly';
+
+      expect(() => validateAvoJson(json)).toThrow(
+        /must be one of interface-only, events-only, all/,
+      );
+    });
+
+    it('surfaces on a non-pull command path (loadAvoJson)', async () => {
+      const json: any = baseJson();
+      json.libraryInterfaceFileFilter = 'interfaceonly';
+      fs.writeFileSync('avo.json', JSON.stringify(json, null, 2));
+
+      await expect(loadAvoJson()).rejects.toThrow(
+        /must be one of interface-only, events-only, all/,
+      );
+    });
+
+    it('surfaces on the pull command path (loadAvoJsonOrInit)', async () => {
+      const json: any = baseJson();
+      json.libraryInterfaceFileFilter = 'interfaceonly';
+      fs.writeFileSync('avo.json', JSON.stringify(json, null, 2));
+
+      await expect(
+        loadAvoJsonOrInit({
+          argv: {},
+          skipInit: false,
+          skipPullMaster: false,
+        }),
+      ).rejects.toThrow(/must be one of interface-only, events-only, all/);
+    });
+
+    it('accepts a well-formed value on both levels', async () => {
+      const json: any = baseJson();
+      json.libraryInterfaceFileFilter = 'events-only';
+      json.sources[0].libraryInterfaceFileFilter = 'interface-only';
+
+      const validated: any = await validateAvoJson(json);
+      expect(validated.libraryInterfaceFileFilter).toBe('events-only');
+      expect(validated.sources[0].libraryInterfaceFileFilter).toBe(
+        'interface-only',
+      );
+    });
+  });
+
+  describe('persistence across write paths', () => {
+    useTempCwd();
+
+    it('applyBranchToAvoJson keeps the top-level setting across a checkout', () => {
+      const json: any = baseJson();
+      json.libraryInterfaceFileFilter = 'interface-only';
+      json.teamNote = 'shared interface repo';
+
+      const next: any = applyBranchToAvoJson(json, {
+        id: 'branch-1',
+        name: 'feature',
+      });
+
+      expect(next.branch).toEqual({ id: 'branch-1', name: 'feature' });
+      expect(next.libraryInterfaceFileFilter).toBe('interface-only');
+      expect(next.teamNote).toBe('shared interface repo');
+    });
+
+    it('codegen preserves per-source state and never writes the per-run flag back', async () => {
+      const json: any = baseJson();
+      json.libraryInterfaceFileFilter = 'events-only';
+      json.sources[0].libraryInterfaceFileFilter = 'events-only';
+      json.sources[0].teamOwner = 'growth';
+      json.sources.pop();
+
+      // The override travels as a pull() argument, so it is absent from the json
+      // codegen deep-copies and persists.
+      const body = buildPullRequestBody(json, json.sources, 'interface-only');
+      expect(body.sources[0].libraryInterfaceFileFilter).toBe('interface-only');
+
+      await codegen(json, {
+        schema: json.schema,
+        sources: [
+          {
+            id: 'source-1',
+            actionId: 'action-2',
+            name: 'Web',
+            branchId: 'master',
+            updatedAt: '2026-08-02T00:00:00.000Z',
+            code: [{ path: 'src/Avo.ts', content: '// generated' }],
+          },
+        ],
+        warnings: [],
+        success: [],
+        errors: '',
+      });
+
+      const written = JSON.parse(fs.readFileSync('avo.json', 'utf8'));
+
+      expect(written.libraryInterfaceFileFilter).toBe('events-only');
+      expect(written.sources[0].libraryInterfaceFileFilter).toBe('events-only');
+      // Unknown per-source state survives too, locking the `...source` spread
+      // rather than this one field.
+      expect(written.sources[0].teamOwner).toBe('growth');
+      expect(JSON.stringify(written)).not.toContain('interface-only');
+    });
+  });
+
+  describe('applyPullResult', () => {
+    useTempCwd();
+
+    it('runs codegen when the response is ok', async () => {
+      const json: any = baseJson();
+      const runCodegen = jest.fn<(a: any, b: any) => void>();
+      const retry = jest.fn<(a: any, b: any, c: any) => void>();
+      const result: any = { ok: true, sources: [] };
+
+      await applyPullResult('Web', json, result, 'events-only', {
+        runCodegen,
+        retry,
+      });
+
+      expect(runCodegen).toHaveBeenCalledWith(json, result);
+      expect(retry).not.toHaveBeenCalled();
+    });
+
+    // codegen resolves only once avo.json and every generated file are on disk.
+    // Discarding its promise let pull() resolve before those writes finished and
+    // hid rejections from the pull command's own .catch analytics path (they
+    // still landed on the process-wide unhandledRejection handler, but with a
+    // bare process.exit(1) that loses per-command context).
+    it("awaits an async runCodegen before resolving", async () => {
+      const json: any = baseJson();
+      let resolved = false;
+      let releaseCodegen: () => void = () => {};
+      const codegenDone = new Promise<void>((resolve) => {
+        releaseCodegen = resolve;
+      });
+      const runCodegen = jest.fn(() =>
+        codegenDone.then(() => {
+          resolved = true;
+        }),
+      );
+
+      const applyPromise = applyPullResult(
+        'Web',
+        json,
+        { ok: true, sources: [] } as any,
+        undefined,
+        { runCodegen },
+      );
+
+      // A microtask turn — enough for a discarded promise's caller to resolve.
+      await Promise.resolve();
+      expect(resolved).toBe(false);
+
+      releaseCodegen();
+      await applyPromise;
+
+      expect(resolved).toBe(true);
+    });
+
+    it('surfaces a runCodegen rejection to the caller', async () => {
+      const json: any = baseJson();
+      const runCodegen = jest.fn(() =>
+        Promise.reject(new Error('codegen failed to write avo.json')),
+      );
+
+      await expect(
+        applyPullResult(
+          'Web',
+          json,
+          { ok: true, sources: [] } as any,
+          undefined,
+          { runCodegen },
+        ),
+      ).rejects.toThrow('codegen failed to write avo.json');
+    });
+
+    it('writes nothing and forwards the override to the post-checkout retry when the branch is closed', async () => {
+      const json: any = baseJson();
+      json.libraryInterfaceFileFilter = 'events-only';
+      fs.writeFileSync('avo.json', JSON.stringify(json, null, 2));
+      const before = fs.readFileSync('avo.json', 'utf8');
+      const retry = jest.fn<(a: any, b: any, c: any) => void>();
+
+      await applyPullResult(
+        'Web',
+        json,
+        {
+          ok: false,
+          branchName: 'feature',
+          reason: 'closed',
+          closedAt: new Date().toISOString(),
+        } as any,
+        'interface-only',
+        { retry },
+      );
+
+      expect(retry).toHaveBeenCalledWith('Web', json, 'interface-only');
+      expect(fs.readFileSync('avo.json', 'utf8')).toBe(before);
+      expect(fs.readdirSync('.')).toEqual(['avo.json']);
+    });
+  });
+});
+
+describe('avo init and libraryInterfaceFileFilter', () => {
+  const workspace = { id: 'schema-1', name: 'Test Workspace' };
+
+  let previousCi: string | undefined;
+
+  beforeEach(() => {
+    previousCi = process.env.CI;
+    delete process.env.CI;
+  });
+
+  afterEach(() => {
+    if (previousCi === undefined) {
+      delete process.env.CI;
+    } else {
+      process.env.CI = previousCi;
+    }
+  });
+
+  const fetchWorkspaces =
+    (...workspaces: object[]) =>
+    () =>
+      Promise.resolve({ workspaces } as any);
+
+  // The info line is the only discovery surface now that init does not prompt —
+  // the way to enable the feature is to edit avo.json, so the line must name
+  // both settings and where they live.
+  describe('buildLibraryInterfaceFileFilterInfoLine', () => {
+    it('names both settings and their values and where they go', () => {
+      const line = buildLibraryInterfaceFileFilterInfoLine();
+
+      expect(line).toContain('libraryInterfaceFileFilter');
+      expect(line).toContain('libraryInterfaceSharedModule');
+      expect(line).toContain('interface-only');
+      expect(line).toContain('events-only');
+      expect(line).toContain('all');
+      expect(line).toContain('avo.json');
+    });
+  });
+
+  // Locked-in decision: init leaves both keys absent (absent means 'all') and
+  // prints the info line — no prompt, no --flag, no --pre-answer. Advanced
+  // setup, few users reach it; the cost of prompting every user was worse than
+  // the discoverability cost of not prompting.
+  describe('init() never prompts for the split-mode settings', () => {
+    it('single-workspace: no prompt, omits both keys', async () => {
+      const promptFn = jest.fn() as any;
+      const reportInfo = jest.fn<(text: string) => void>();
+
+      const json: any = await init({
+        fetchWorkspaces: fetchWorkspaces(workspace),
+        promptFn,
+        reportInfo,
+      });
+
+      expect(promptFn).not.toHaveBeenCalled();
+      expect('libraryInterfaceFileFilter' in json).toBe(false);
+      expect('libraryInterfaceSharedModule' in json).toBe(false);
+      const infoLines = reportInfo.mock.calls.map((c) => String(c[0])).join('\n');
+      expect(infoLines).toContain('libraryInterfaceFileFilter');
+      expect(infoLines).toContain('libraryInterfaceSharedModule');
+    });
+
+    it('multi-workspace: prompts ONLY for the workspace picker, omits both keys', async () => {
+      const otherWorkspace = { id: 'schema-2', name: 'Other Workspace' };
+      const promptFn = jest.fn(async (questions: any) => {
+        expect(questions[0].name).toBe('schema');
+        return { schema: otherWorkspace };
+      }) as any;
+
+      const json: any = await init({
+        fetchWorkspaces: fetchWorkspaces(workspace, otherWorkspace),
+        promptFn,
+        reportInfo: () => {},
+      });
+
+      expect(promptFn).toHaveBeenCalledTimes(1);
+      expect(json.schema.id).toBe('schema-2');
+      expect('libraryInterfaceFileFilter' in json).toBe(false);
+      expect('libraryInterfaceSharedModule' in json).toBe(false);
+    });
+  });
+
+  describe('implicit init from the pull path', () => {
+    useTempCwd();
+
+    it('completes in CI without prompting when avo.json is missing', async () => {
+      const promptFn = jest.fn();
+      process.env.CI = 'true';
+
+      const json: any = await loadAvoJsonOrInit({
+        argv: { token: 'test-token' },
+        skipInit: false,
+        skipPullMaster: false,
+        initFn: () =>
+          init({
+            fetchWorkspaces: fetchWorkspaces(workspace),
+            promptFn: promptFn as any,
+            reportInfo: () => {},
+          }),
+      });
+
+      expect(promptFn).not.toHaveBeenCalled();
+      expect(json.schema.id).toBe('schema-1');
+      expect('libraryInterfaceFileFilter' in json).toBe(false);
+    });
+  });
+});
+
+describe('stale files from a previous filter', () => {
+  describe('collectStaleSuppressedFiles', () => {
+    it('keeps only the suppressed paths that exist on disk', () => {
+      const exists = (p: string) => p === 'src/AvoLibrary.ts';
+
+      expect(
+        collectStaleSuppressedFiles(
+          ['src/AvoLibrary.ts', 'src/AvoConfig.ts'],
+          exists,
+        ),
+      ).toEqual(['src/AvoLibrary.ts']);
+    });
+
+    it('preserves response order for multiple stale paths', () => {
+      expect(
+        collectStaleSuppressedFiles(['b.ts', 'a.ts', 'c.ts'], () => true),
+      ).toEqual(['b.ts', 'a.ts', 'c.ts']);
+    });
+
+    it('returns nothing for an absent or empty suppressedPaths', () => {
+      expect(collectStaleSuppressedFiles(undefined, () => true)).toEqual([]);
+      expect(collectStaleSuppressedFiles([], () => true)).toEqual([]);
+    });
+  });
+
+  describe('buildStaleSuppressedFileWarning', () => {
+    it('names the file without claiming which side of the split it is', () => {
+      const warning = buildStaleSuppressedFileWarning('src/AvoLibrary.ts');
+
+      expect(warning).toContain('[avo] Warning:');
+      expect(warning).toContain('src/AvoLibrary.ts');
+      expect(warning).toMatch(/no longer generated/i);
+      expect(warning).toContain('libraryInterfaceFileFilter');
+    });
+
+    // Under interface-only the suppressed files are app/event files, not the
+    // interface — wording that names the interface would send a user to delete
+    // the wrong file.
+    it('uses the same wording for an app-side file', () => {
+      const warning = buildStaleSuppressedFileWarning('src/AvoEvents/clicked.ts');
+
+      expect(warning).toContain('src/AvoEvents/clicked.ts');
+      expect(warning).not.toContain('shared interface');
+    });
+  });
+
+  describe('codegen', () => {
+    useTempCwd();
+
+    let logSpy: any;
+
+    beforeEach(() => {
+      logSpy = jest.spyOn(console, 'log').mockImplementation(() => undefined);
+    });
+
+    afterEach(() => {
+      logSpy.mockRestore();
+    });
+
+    const staleWarnings = () =>
+      logSpy.mock.calls
+        .map((call: unknown[]) => call.join(' '))
+        .filter((line: string) => line.includes('[avo] Warning:'));
+
+    const jsonWith = (
+      libraryInterfaceFileFilter?: string,
+      sourcePath = 'src/Avo.ts',
+    ): any => ({
+      avo: { version: 3 },
+      schema: { id: 'schema-1', name: 'Test Workspace' },
+      branch: { id: 'master', name: 'main' },
+      ...(libraryInterfaceFileFilter === undefined
+        ? {}
+        : { libraryInterfaceFileFilter }),
+      sources: [
+        {
+          id: 'source-1',
+          name: 'Web',
+          path: sourcePath,
+          interfacePath: sourcePath,
+          actionId: 'action-1',
+          branchId: 'master',
+          updatedAt: '2026-08-01T00:00:00.000Z',
+        },
+      ],
+    });
+
+    const target = (extra: object = {}) => ({
+      id: 'source-1',
+      actionId: 'action-2',
+      name: 'Web',
+      branchId: 'master',
+      updatedAt: '2026-08-02T00:00:00.000Z',
+      code: [{ path: 'src/AvoEvents/eventClicked.ts', content: '// event' }],
+      ...extra,
+    });
+
+    const result = (extra: object = {}): any => ({
+      schema: { id: 'schema-1', name: 'Test Workspace' },
+      sources: [target(extra)],
+      warnings: [],
+      success: [],
+      errors: '',
+    });
+
+    it('warns about a stale suppressed file and never deletes it', async () => {
+      fs.mkdirSync('src', { recursive: true });
+      fs.writeFileSync('src/AvoLibrary.ts', '// stale shared interface');
+
+      await codegen(
+        jsonWith('events-only'),
+        result({ suppressedPaths: ['src/AvoLibrary.ts'] }),
+      );
+
+      const warnings = staleWarnings();
+      expect(warnings).toHaveLength(1);
+      expect(warnings[0]).toContain('src/AvoLibrary.ts');
+      expect(fs.existsSync('src/AvoLibrary.ts')).toBe(true);
+      expect(fs.readFileSync('src/AvoLibrary.ts', 'utf8')).toBe(
+        '// stale shared interface',
+      );
+    });
+
+    it('does not warn about a suppressed path that is not on disk', async () => {
+      await codegen(
+        jsonWith('events-only'),
+        result({ suppressedPaths: ['src/AvoLibrary.ts'] }),
+      );
+
+      expect(staleWarnings()).toEqual([]);
+    });
+
+    // An 'all' run is expressed by the server returning no suppressed paths, not by
+    // the CLI re-deciding locally — that is the whole point of the response-driven gate.
+    it("does not warn when the response suppressed nothing, as an 'all' run does", async () => {
+      fs.mkdirSync('src', { recursive: true });
+      fs.writeFileSync('src/AvoLibrary.ts', '// stale');
+
+      await codegen(jsonWith(undefined), result({ suppressedPaths: [] }));
+      expect(staleWarnings()).toEqual([]);
+
+      await codegen(jsonWith(undefined), result());
+      expect(staleWarnings()).toEqual([]);
+    });
+
+    // Regression: a one-run override leaves avo.json resolving to 'all', so a locally
+    // resolved gate would swallow this warning. The response is the only thing that knows.
+    it('warns when a per-run override is the reason files were suppressed', async () => {
+      fs.mkdirSync('src', { recursive: true });
+      fs.writeFileSync('src/AvoLibrary.ts', '// stale');
+
+      await codegen(
+        jsonWith(undefined),
+        result({ suppressedPaths: ['src/AvoLibrary.ts'] }),
+      );
+
+      expect(staleWarnings()).toHaveLength(1);
+    });
+
+    it('does not throw or warn when the response has no suppressedPaths', async () => {
+      fs.mkdirSync('src', { recursive: true });
+      fs.writeFileSync('src/AvoLibrary.ts', '// stale');
+
+      await expect(
+        codegen(jsonWith('events-only'), result()),
+      ).resolves.toBeUndefined();
+      expect(staleWarnings()).toEqual([]);
+    });
+
+    it('emits one warning line per stale path, in response order', async () => {
+      fs.mkdirSync('src', { recursive: true });
+      fs.writeFileSync('src/Avo.ts', '// stale app file');
+      fs.writeFileSync('src/AvoConfig.ts', '// stale config');
+
+      await codegen(
+        jsonWith('interface-only'),
+        result({
+          suppressedPaths: ['src/AvoConfig.ts', 'src/Missing.ts', 'src/Avo.ts'],
+        }),
+      );
+
+      const warnings = staleWarnings();
+      expect(warnings).toHaveLength(2);
+      expect(warnings[0]).toContain('src/AvoConfig.ts');
+      expect(warnings[1]).toContain('src/Avo.ts');
+    });
+
+    // Two targets pointing at the same shell path is the multi-source client-repo
+    // shape (Web + Node both consuming ./shell/AvoLibrary.ts). Warning three times
+    // per pull would be noise; the user can only delete each file once.
+    it('warns once per stale path even if multiple targets reference it', async () => {
+      fs.mkdirSync('src', { recursive: true });
+      fs.writeFileSync('src/AvoLibrary.ts', '// stale shared interface');
+
+      const multiSourceJson = jsonWith('events-only');
+      multiSourceJson.sources.push({
+        ...multiSourceJson.sources[0],
+        id: 'source-2',
+        name: 'Node',
+        path: 'src/AvoNode.ts',
+        interfacePath: 'src/AvoNode.ts',
+      });
+
+      await codegen(multiSourceJson, {
+        schema: { id: 'schema-1', name: 'Test Workspace' },
+        sources: [
+          target({ suppressedPaths: ['src/AvoLibrary.ts'] }),
+          target({
+            id: 'source-2',
+            code: [{ path: 'src/AvoNodeEvents/eventClicked.ts', content: '// event' }],
+            suppressedPaths: ['src/AvoLibrary.ts'],
+          }),
+        ],
+        warnings: [],
+        success: [],
+        errors: '',
+      } as any);
+
+      const warnings = staleWarnings();
+      expect(warnings).toHaveLength(1);
+      expect(warnings[0]).toContain('src/AvoLibrary.ts');
+    });
+
+    it('leaves the per-event directory intact under interface-only', async () => {
+      fs.mkdirSync('src/AvoEvents', { recursive: true });
+      fs.writeFileSync(
+        'src/Avo.ts',
+        [
+          '// AVOMODULEMAP: "Avo"',
+          '// AVOEVENTMAP: ["EventClicked", "EventViewed"]',
+        ].join('\n'),
+      );
+      fs.writeFileSync('src/AvoEvents/eventClicked.ts', '// event');
+      fs.writeFileSync('src/AvoEvents/eventViewed.ts', '// event');
+
+      // interface-only means the main file is absent from the response, so the
+      // per-event cleanup gate never opens and nothing under AvoEvents/ is touched.
+      await codegen(
+        jsonWith('interface-only'),
+        result({
+          code: [{ path: 'src/AvoLibrary.ts', content: '// interface' }],
+        }),
+      );
+
+      expect(fs.existsSync('src/AvoEvents/eventClicked.ts')).toBe(true);
+      expect(fs.existsSync('src/AvoEvents/eventViewed.ts')).toBe(true);
+    });
+  });
+});
+
+describe('buildSourcePaths', () => {
+  const cwd = path.resolve('/repo');
+
+  it('puts the interface file in the same folder as the events file', () => {
+    expect(
+      buildSourcePaths(
+        { folder: 'library/src/main/kotlin/sh/avo/library', filename: 'Avo.kt' },
+        { interfaceFilename: 'AvoInterface.kt' },
+        cwd,
+      ),
+    ).toEqual({
+      path: path.join(
+        'library',
+        'src',
+        'main',
+        'kotlin',
+        'sh',
+        'avo',
+        'library',
+        'Avo.kt',
+      ),
+      interfacePath: path.join(
+        'library',
+        'src',
+        'main',
+        'kotlin',
+        'sh',
+        'avo',
+        'library',
+        'AvoInterface.kt',
+      ),
+    });
+  });
+
+  it('splits a source into two filenames that never diverge in directory', () => {
+    const { path: mainPath, interfacePath } = buildSourcePaths(
+      { folder: 'app/src/main/kotlin/analytics', filename: 'Avo.kt' },
+      { interfaceFilename: 'AvoInterface.kt' },
+      cwd,
+    );
+
+    expect(path.dirname(mainPath)).toBe(path.dirname(interfacePath));
+    expect(path.basename(mainPath)).toBe('Avo.kt');
+    expect(path.basename(interfacePath)).toBe('AvoInterface.kt');
+  });
+
+  it('reuses the main path when the source cannot have an interface file', () => {
+    // canHaveInterfaceFile !== true skips the interface prompt entirely, so
+    // moreAnswers comes back empty and there is no second file to place.
+    expect(
+      buildSourcePaths({ folder: 'src', filename: 'Avo.ts' }, {}, cwd),
+    ).toEqual({
+      path: path.join('src', 'Avo.ts'),
+      interfacePath: path.join('src', 'Avo.ts'),
+    });
+  });
+
+  it('resolves an absolute folder answer back to a cwd-relative path', () => {
+    expect(
+      buildSourcePaths(
+        { folder: path.join(cwd, 'library'), filename: 'Avo.kt' },
+        { interfaceFilename: 'AvoInterface.kt' },
+        cwd,
+      ),
+    ).toEqual({
+      path: path.join('library', 'Avo.kt'),
+      interfacePath: path.join('library', 'AvoInterface.kt'),
+    });
   });
 });
