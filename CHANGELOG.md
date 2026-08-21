@@ -1,5 +1,14 @@
 ## Unreleased
 
+## 3.6.0 (2026-08-21)
+
+Add `libraryInterfaceFileFilter` config option and a matching `avo pull` flag to control which events land in the generated library interface file
+Warn when a filter change leaves stale generated files behind, without ever deleting them
+Ask for a single output folder when adding a source instead of prompting twice
+Preserve unknown top-level `avo.json` keys through conflict resolution
+Forward `libraryInterfaceSharedModule` correctly and stop resurrecting `force` during conflict resolution
+Update dependencies (tmp, minimatch, lodash, handlebars)
+
 ## 3.5.0 (2026-03-24)
 
 Support `interfaceFilenameHint` from backend API
