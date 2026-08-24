@@ -1,6 +1,6 @@
 ## Unreleased
 
-## 3.6.0 (2026-08-21)
+## 3.6.0 (2026-08-24)
 
 Add `libraryInterfaceFileFilter` config option and a matching `avo pull` flag to control which events land in the generated library interface file
 Warn when a filter change leaves stale generated files behind, without ever deleting them
