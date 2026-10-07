@@ -1,5 +1,7 @@
 ## Unreleased
 
+Add per-source `libraryInterfacePublicItems` config option to keep chosen items public in the Swift/Kotlin library interface app file
+
 ## 3.6.0 (2026-08-24)
 
 Add `libraryInterfaceFileFilter` config option and a matching `avo pull` flag to control which events land in the generated library interface file

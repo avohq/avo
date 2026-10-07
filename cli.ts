@@ -494,6 +494,10 @@ type Source = {
   // server-side. Distinct from interfacePath above, which names this source's own
   // classic-split base file.
   libraryInterfaceSharedModule?: string;
+  // Names in the generated library-interface app file (e.g. 'AvoTypes.Platform',
+  // 'initAvo') that stay public when the file is otherwise internal. Forwarded
+  // raw; codegen resolves the names and warns about unknown ones.
+  libraryInterfacePublicItems?: string[];
   analysis?: {
     glob: string;
     module?: string;
@@ -530,6 +534,21 @@ export function parseLibraryInterfaceFileFilter(
     `Invalid libraryInterfaceFileFilter '${value}'${context} — must be one of ${LIBRARY_INTERFACE_FILE_FILTER_VALUES.join(
       ', ',
     )}`,
+  );
+}
+
+export function parseLibraryInterfacePublicItems(
+  value: unknown,
+  context = '',
+): string[] {
+  if (
+    Array.isArray(value) &&
+    value.every((item) => typeof item === 'string' && item !== '')
+  ) {
+    return value;
+  }
+  throw new AvoError(
+    `Invalid libraryInterfacePublicItems${context} — must be an array of non-empty strings`,
   );
 }
 
@@ -861,6 +880,12 @@ export function validateAvoJson(json: AvoJson): Promise<AvoJson> {
     if (source.libraryInterfaceFileFilter !== undefined) {
       parseLibraryInterfaceFileFilter(
         source.libraryInterfaceFileFilter,
+        ` on source '${source.name}' in ${file('avo.json')}`,
+      );
+    }
+    if (source.libraryInterfacePublicItems !== undefined) {
+      parseLibraryInterfacePublicItems(
+        source.libraryInterfacePublicItems,
         ` on source '${source.name}' in ${file('avo.json')}`,
       );
     }
@@ -1711,6 +1736,11 @@ export function buildPullRequestBody(
         ...(libraryInterfaceSharedModule === undefined
           ? {}
           : { libraryInterfaceSharedModule }),
+        ...(source.libraryInterfacePublicItems === undefined
+          ? {}
+          : {
+              libraryInterfacePublicItems: source.libraryInterfacePublicItems,
+            }),
       };
     }),
     force: json.force ?? false,

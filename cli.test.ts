@@ -882,6 +882,57 @@ describe('libraryInterfaceFileFilter', () => {
     });
   });
 
+  describe('libraryInterfacePublicItems', () => {
+    it('forwards a valid per-source list on pull', () => {
+      const json: any = baseJson();
+      json.sources[1].libraryInterfacePublicItems = [
+        'AvoTypes.Platform',
+        'initAvo',
+      ];
+
+      const body = buildPullRequestBody(json, json.sources);
+
+      expect(body.sources[1].libraryInterfacePublicItems).toEqual([
+        'AvoTypes.Platform',
+        'initAvo',
+      ]);
+      expect('libraryInterfacePublicItems' in body.sources[0]).toBe(false);
+    });
+
+    it('omits the key entirely when unset', () => {
+      const json: any = baseJson();
+
+      const body = buildPullRequestBody(json, json.sources);
+
+      expect(
+        body.sources.map((s: any) => 'libraryInterfacePublicItems' in s),
+      ).toEqual([false, false]);
+    });
+
+    it('accepts a valid list in validateAvoJson', async () => {
+      const json: any = baseJson();
+      json.sources[1].libraryInterfacePublicItems = ['LoginSuccessEvent'];
+
+      const validated: any = await validateAvoJson(json);
+      expect(validated.sources[1].libraryInterfacePublicItems).toEqual([
+        'LoginSuccessEvent',
+      ]);
+    });
+
+    it.each([
+      ['a non-array', 'initAvo'],
+      ['an array with a non-string', ['initAvo', 42]],
+      ['an array with an empty string', ['initAvo', '']],
+    ])('rejects %s, naming the source', (_label, value) => {
+      const json: any = baseJson();
+      json.sources[1].libraryInterfacePublicItems = value;
+
+      expect(() => validateAvoJson(json)).toThrow(
+        /Invalid libraryInterfacePublicItems on source 'iOS'.*must be an array of non-empty strings/,
+      );
+    });
+  });
+
   describe('persistence across write paths', () => {
     useTempCwd();
 
