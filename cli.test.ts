@@ -1128,6 +1128,21 @@ describe('libraryInterfaceFileFilter', () => {
       );
     });
 
+    it.each([
+      ['an empty string', ''],
+      ['a number', 42],
+    ])(
+      'rejects %s as a flat libraryInterfaceSharedModule, like the nested one',
+      (_label, value) => {
+        const json: any = baseJson();
+        json.sources[1].libraryInterfaceSharedModule = value;
+
+        expect(() => validateAvoJson(json)).toThrow(
+          "Invalid libraryInterfaceSharedModule on source 'iOS' in avo.json — must be a non-empty string",
+        );
+      },
+    );
+
     // publicItems never shipped in the flat form, so a flat key is a mistake to
     // report rather than a value to forward or silently drop.
     it('rejects a flat libraryInterfacePublicItems, pointing at the nested key', () => {

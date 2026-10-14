@@ -929,6 +929,20 @@ function joinWithOr(words: string[]): string {
     : `${words.slice(0, -1).join(', ')} or ${words[words.length - 1]}`;
 }
 
+// An empty handle would reach the generators verbatim, so it is rejected at load
+// time in either form.
+function validateSharedModule(
+  value: unknown,
+  context: string,
+  settingName: string,
+): void {
+  if (value !== undefined && (typeof value !== 'string' || value === '')) {
+    throw new AvoError(
+      `Invalid ${settingName}${context} — must be a non-empty string`,
+    );
+  }
+}
+
 function validateNestedLibraryInterface(
   nested: unknown,
   holder: LibraryInterfaceHolder,
@@ -971,14 +985,7 @@ function validateNestedLibraryInterface(
       'libraryInterface.fileFilter',
     );
   }
-  if (
-    sharedModule !== undefined &&
-    (typeof sharedModule !== 'string' || sharedModule === '')
-  ) {
-    throw new AvoError(
-      `Invalid libraryInterface.sharedModule${context} — must be a non-empty string`,
-    );
-  }
+  validateSharedModule(sharedModule, context, 'libraryInterface.sharedModule');
   if (publicItems !== undefined) {
     parseLibraryInterfacePublicItems(publicItems, context);
   }
@@ -1007,6 +1014,11 @@ function validateLibraryInterfaceSettings(
   if (holder.libraryInterfaceFileFilter !== undefined) {
     parseLibraryInterfaceFileFilter(holder.libraryInterfaceFileFilter, context);
   }
+  validateSharedModule(
+    holder.libraryInterfaceSharedModule,
+    context,
+    'libraryInterfaceSharedModule',
+  );
 }
 
 export function validateAvoJson(json: AvoJson): Promise<AvoJson> {
