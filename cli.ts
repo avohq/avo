@@ -541,15 +541,25 @@ export function parseLibraryInterfacePublicItems(
   value: unknown,
   context = '',
 ): string[] {
-  if (
-    Array.isArray(value) &&
-    value.every((item) => typeof item === 'string' && item !== '')
-  ) {
-    return value;
+  if (!Array.isArray(value)) {
+    throw new AvoError(
+      `Invalid libraryInterfacePublicItems${context} — must be an array of non-empty strings`,
+    );
   }
-  throw new AvoError(
-    `Invalid libraryInterfacePublicItems${context} — must be an array of non-empty strings`,
+  // Names are matched exactly, so a padded entry would only come back as an
+  // unknown-name warning after the pull; reject it here instead.
+  const badIndex = value.findIndex(
+    (item) => typeof item !== 'string' || item === '' || item.trim() !== item,
   );
+  if (badIndex !== -1) {
+    const bad = value[badIndex];
+    throw new AvoError(
+      `Invalid libraryInterfacePublicItems${context} — must be an array of non-empty strings without surrounding whitespace; entry ${badIndex} is ${
+        typeof bad === 'string' ? `'${bad}'` : JSON.stringify(bad)
+      }`,
+    );
+  }
+  return value;
 }
 
 export function resolveLibraryInterfaceFileFilter({

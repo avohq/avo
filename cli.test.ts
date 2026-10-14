@@ -931,6 +931,31 @@ describe('libraryInterfaceFileFilter', () => {
         /Invalid libraryInterfacePublicItems on source 'iOS'.*must be an array of non-empty strings/,
       );
     });
+
+    it.each([
+      ['a whitespace-only entry', ['initAvo', '   '], 1, "'   '"],
+      ['an entry with leading whitespace', [' initAvo'], 0, "' initAvo'"],
+      [
+        'an entry with trailing whitespace',
+        ['A', 'B', 'initAvo\t'],
+        2,
+        "'initAvo\t'",
+      ],
+    ])('rejects %s, naming the bad entry', (_label, value, index, shown) => {
+      const json: any = baseJson();
+      json.sources[1].libraryInterfacePublicItems = value;
+
+      expect(() => validateAvoJson(json)).toThrow(
+        `Invalid libraryInterfacePublicItems on source 'iOS' in avo.json — must be an array of non-empty strings without surrounding whitespace; entry ${index} is ${shown}`,
+      );
+    });
+
+    it('names a non-string entry by its index', () => {
+      const json: any = baseJson();
+      json.sources[1].libraryInterfacePublicItems = ['initAvo', 42];
+
+      expect(() => validateAvoJson(json)).toThrow(/entry 1 is 42$/);
+    });
   });
 
   describe('persistence across write paths', () => {
