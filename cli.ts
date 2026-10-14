@@ -1177,7 +1177,13 @@ export function buildAvoJsonFilterMismatchWarning(
   if (headFilter === incomingFilter) {
     return null;
   }
-  return `avo.json conflict: kept libraryInterfaceFileFilter '${
+  // Named as the user's file writes it, so the message points at a key they have.
+  const namedSide = headFilter === undefined ? incoming : head;
+  const settingName =
+    namedSide.libraryInterface?.fileFilter === undefined
+      ? 'libraryInterfaceFileFilter'
+      : 'libraryInterface.fileFilter';
+  return `avo.json conflict: kept ${settingName} '${
     headFilter ?? 'all'
   }' from your branch (incoming had '${incomingFilter ?? 'all'}')`;
 }

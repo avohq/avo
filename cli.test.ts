@@ -1175,7 +1175,22 @@ describe('libraryInterfaceFileFilter', () => {
         ),
       ]).toEqual([
         null,
+        "avo.json conflict: kept libraryInterface.fileFilter 'events-only' from your branch (incoming had 'interface-only')",
+      ]);
+    });
+
+    it('names the setting as the kept side writes it, else as the incoming side does', () => {
+      expect([
+        buildAvoJsonFilterMismatchWarning(
+          { libraryInterfaceFileFilter: 'events-only' },
+          { libraryInterface: { fileFilter: 'interface-only' } } as any,
+        ),
+        buildAvoJsonFilterMismatchWarning({}, {
+          libraryInterface: { fileFilter: 'interface-only' },
+        } as any),
+      ]).toEqual([
         "avo.json conflict: kept libraryInterfaceFileFilter 'events-only' from your branch (incoming had 'interface-only')",
+        "avo.json conflict: kept libraryInterface.fileFilter 'all' from your branch (incoming had 'interface-only')",
       ]);
     });
   });
