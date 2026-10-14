@@ -1,6 +1,7 @@
 ## Unreleased
 
-Add per-source `libraryInterfacePublicItems` config option to keep chosen items public in the Swift/Kotlin library interface app file
+Group the library interface settings in `avo.json` under a `libraryInterface` object (`fileFilter`, `sharedModule`, and per source `publicItems`). The flat `libraryInterfaceFileFilter` and `libraryInterfaceSharedModule` keys still work, but one level can't set both forms
+Add per-source `libraryInterface.publicItems` to keep chosen items public in the Swift/Kotlin library interface app file
 
 ## 3.6.0 (2026-08-24)
 

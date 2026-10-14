@@ -480,6 +480,19 @@ export const LIBRARY_INTERFACE_FILE_FILTER_VALUES = [
 type LibraryInterfaceFileFilter =
   (typeof LIBRARY_INTERFACE_FILE_FILTER_VALUES)[number];
 
+type LibraryInterfaceSettings = {
+  fileFilter?: LibraryInterfaceFileFilter;
+  // The module this source's event files import the SHARED library interface from
+  // — a Kotlin package or a TypeScript module specifier, consumed verbatim
+  // server-side. Distinct from interfacePath, which names this source's own
+  // classic-split base file.
+  sharedModule?: string;
+  // Names in the generated library-interface app file (e.g. 'AvoTypes.Platform',
+  // 'initAvo') that stay public when the file is otherwise internal. Forwarded
+  // raw; codegen resolves the names and warns about unknown ones.
+  publicItems?: string[];
+};
+
 type Source = {
   id: string;
   name: string;
@@ -488,16 +501,10 @@ type Source = {
   branchId: string;
   updatedAt: string;
   interfacePath?: string;
+  // The 3.6.0 flat forms of libraryInterface.fileFilter / .sharedModule.
   libraryInterfaceFileFilter?: LibraryInterfaceFileFilter;
-  // The module this source's event files import the SHARED library interface from
-  // — a Kotlin package or a TypeScript module specifier, consumed verbatim
-  // server-side. Distinct from interfacePath above, which names this source's own
-  // classic-split base file.
   libraryInterfaceSharedModule?: string;
-  // Names in the generated library-interface app file (e.g. 'AvoTypes.Platform',
-  // 'initAvo') that stay public when the file is otherwise internal. Forwarded
-  // raw; codegen resolves the names and warns about unknown ones.
-  libraryInterfacePublicItems?: string[];
+  libraryInterface?: LibraryInterfaceSettings;
   analysis?: {
     glob: string;
     module?: string;
@@ -516,12 +523,39 @@ type AvoJson = {
   forceFeatures?: string;
   libraryInterfaceFileFilter?: LibraryInterfaceFileFilter;
   libraryInterfaceSharedModule?: string;
+  // publicItems names declarations in one source's app file, so it is per source only.
+  libraryInterface?: Omit<LibraryInterfaceSettings, 'publicItems'>;
   sources?: Source[];
 };
+
+// The library-interface settings, read from a source or from the top level of
+// avo.json. Each level takes them either nested under `libraryInterface` or as
+// the flat `libraryInterfaceFileFilter` / `libraryInterfaceSharedModule` keys
+// released in 3.6.0, never both (validateAvoJson rejects that). The pull request
+// body keeps the flat keys, so the server never sees which form a file used.
+type LibraryInterfaceHolder = {
+  libraryInterface?: LibraryInterfaceSettings;
+  libraryInterfaceFileFilter?: LibraryInterfaceFileFilter;
+  libraryInterfaceSharedModule?: string;
+};
+
+function libraryInterfaceSettingsOf(
+  holder: LibraryInterfaceHolder,
+): LibraryInterfaceSettings {
+  return {
+    fileFilter:
+      holder.libraryInterface?.fileFilter ?? holder.libraryInterfaceFileFilter,
+    sharedModule:
+      holder.libraryInterface?.sharedModule ??
+      holder.libraryInterfaceSharedModule,
+    publicItems: holder.libraryInterface?.publicItems,
+  };
+}
 
 export function parseLibraryInterfaceFileFilter(
   value: unknown,
   context = '',
+  settingName = 'libraryInterfaceFileFilter',
 ): LibraryInterfaceFileFilter {
   if (
     LIBRARY_INTERFACE_FILE_FILTER_VALUES.includes(
@@ -531,7 +565,7 @@ export function parseLibraryInterfaceFileFilter(
     return value as LibraryInterfaceFileFilter;
   }
   throw new AvoError(
-    `Invalid libraryInterfaceFileFilter '${value}'${context} — must be one of ${LIBRARY_INTERFACE_FILE_FILTER_VALUES.join(
+    `Invalid ${settingName} '${value}'${context} — must be one of ${LIBRARY_INTERFACE_FILE_FILTER_VALUES.join(
       ', ',
     )}`,
   );
@@ -546,12 +580,12 @@ export function parseLibraryInterfacePublicItems(
 ): string[] {
   if (!Array.isArray(value)) {
     throw new AvoError(
-      `Invalid libraryInterfacePublicItems${context} — must be an array of non-empty strings`,
+      `Invalid libraryInterface.publicItems${context} — must be an array of non-empty strings`,
     );
   }
   if (value.length > LIBRARY_INTERFACE_PUBLIC_ITEMS_MAX) {
     throw new AvoError(
-      `Invalid libraryInterfacePublicItems${context} — lists ${value.length} entries; at most ${LIBRARY_INTERFACE_PUBLIC_ITEMS_MAX} are allowed`,
+      `Invalid libraryInterface.publicItems${context} — lists ${value.length} entries; at most ${LIBRARY_INTERFACE_PUBLIC_ITEMS_MAX} are allowed`,
     );
   }
   // Names are matched exactly, so a padded entry would only come back as an
@@ -562,7 +596,7 @@ export function parseLibraryInterfacePublicItems(
   if (badIndex !== -1) {
     const bad = value[badIndex];
     throw new AvoError(
-      `Invalid libraryInterfacePublicItems${context} — must be an array of non-empty strings without surrounding whitespace; entry ${badIndex} is ${
+      `Invalid libraryInterface.publicItems${context} — must be an array of non-empty strings without surrounding whitespace; entry ${badIndex} is ${
         typeof bad === 'string' ? `'${bad}'` : JSON.stringify(bad)
       }`,
     );
@@ -576,13 +610,13 @@ export function resolveLibraryInterfaceFileFilter({
   json,
 }: {
   flag?: LibraryInterfaceFileFilter;
-  source: Pick<Source, 'libraryInterfaceFileFilter'>;
-  json: Pick<AvoJson, 'libraryInterfaceFileFilter'>;
+  source: LibraryInterfaceHolder;
+  json: LibraryInterfaceHolder;
 }): LibraryInterfaceFileFilter {
   return (
     flag ??
-    source.libraryInterfaceFileFilter ??
-    json.libraryInterfaceFileFilter ??
+    libraryInterfaceSettingsOf(source).fileFilter ??
+    libraryInterfaceSettingsOf(json).fileFilter ??
     'all'
   );
 }
@@ -593,11 +627,12 @@ export function resolveLibraryInterfaceSharedModule({
   source,
   json,
 }: {
-  source: Pick<Source, 'libraryInterfaceSharedModule'>;
-  json: Pick<AvoJson, 'libraryInterfaceSharedModule'>;
+  source: LibraryInterfaceHolder;
+  json: LibraryInterfaceHolder;
 }): string | undefined {
   return (
-    source.libraryInterfaceSharedModule ?? json.libraryInterfaceSharedModule
+    libraryInterfaceSettingsOf(source).sharedModule ??
+    libraryInterfaceSettingsOf(json).sharedModule
   );
 }
 
@@ -783,14 +818,14 @@ type ApiWorkspacesResult = {
 };
 
 export function buildLibraryInterfaceFileFilterInfoLine(): string {
-  return `Set ${bold('libraryInterfaceFileFilter')} in ${file(
+  return `Set ${bold('libraryInterface.fileFilter')} in ${file(
     'avo.json',
   )} to choose which files ${cmd(
     'avo pull',
   )} generates for sources using a library interface: ${LIBRARY_INTERFACE_FILE_FILTER_VALUES.join(
     ', ',
   )} (defaults to all). When it is not ${bold('all')}, set ${bold(
-    'libraryInterfaceSharedModule',
+    'libraryInterface.sharedModule',
   )} to the module your event files import the shared interface from`;
 }
 
@@ -804,11 +839,11 @@ type InitDeps = {
   reportInfo?: (text: string) => void;
 };
 
-// libraryInterfaceFileFilter / libraryInterfaceSharedModule are an advanced,
-// rarely-used setup, so init does NOT prompt for them — that would tax every
-// user for a feature few reach. init leaves both keys absent (absent means the
-// default, 'all') and prints one discoverability line naming them; the way to
-// enable the feature is to edit avo.json directly.
+// The libraryInterface settings are an advanced, rarely-used setup, so init does
+// NOT prompt for them — that would tax every user for a feature few reach. init
+// leaves them absent (absent means the default, 'all') and prints one
+// discoverability line naming them; the way to enable the feature is to edit
+// avo.json directly.
 export function init(deps: InitDeps = {}): Promise<AvoJson> {
   const promptFn = deps.promptFn ?? inquirer.prompt;
   const fetchWorkspaces =
@@ -877,6 +912,103 @@ export function init(deps: InitDeps = {}): Promise<AvoJson> {
   });
 }
 
+const SOURCE_LIBRARY_INTERFACE_KEYS = [
+  'fileFilter',
+  'sharedModule',
+  'publicItems',
+];
+const TOP_LEVEL_LIBRARY_INTERFACE_KEYS = ['fileFilter', 'sharedModule'];
+const FLAT_LIBRARY_INTERFACE_KEYS = [
+  'libraryInterfaceFileFilter',
+  'libraryInterfaceSharedModule',
+] as const;
+
+function joinWithOr(words: string[]): string {
+  return words.length < 2
+    ? words.join('')
+    : `${words.slice(0, -1).join(', ')} or ${words[words.length - 1]}`;
+}
+
+function validateNestedLibraryInterface(
+  nested: unknown,
+  holder: LibraryInterfaceHolder,
+  context: string,
+  allowedKeys: string[],
+): void {
+  if (typeof nested !== 'object' || nested === null || Array.isArray(nested)) {
+    throw new AvoError(
+      `Invalid libraryInterface${context} — must be an object with ${joinWithOr(
+        allowedKeys,
+      )}`,
+    );
+  }
+  const unknownKey = Object.keys(nested).find(
+    (key) => !allowedKeys.includes(key),
+  );
+  if (unknownKey !== undefined) {
+    throw new AvoError(
+      `Unknown key '${unknownKey}' in libraryInterface${context} — allowed keys are ${allowedKeys.join(
+        ', ',
+      )}`,
+    );
+  }
+  const flatKey = FLAT_LIBRARY_INTERFACE_KEYS.find(
+    (key) => holder[key] !== undefined,
+  );
+  if (flatKey !== undefined) {
+    throw new AvoError(
+      `Set either libraryInterface or ${flatKey}${context}, not both`,
+    );
+  }
+  const { fileFilter, sharedModule, publicItems } = nested as Record<
+    string,
+    unknown
+  >;
+  if (fileFilter !== undefined) {
+    parseLibraryInterfaceFileFilter(
+      fileFilter,
+      context,
+      'libraryInterface.fileFilter',
+    );
+  }
+  if (
+    sharedModule !== undefined &&
+    (typeof sharedModule !== 'string' || sharedModule === '')
+  ) {
+    throw new AvoError(
+      `Invalid libraryInterface.sharedModule${context} — must be a non-empty string`,
+    );
+  }
+  if (publicItems !== undefined) {
+    parseLibraryInterfacePublicItems(publicItems, context);
+  }
+}
+
+function validateLibraryInterfaceSettings(
+  holder: LibraryInterfaceHolder,
+  context: string,
+  allowedKeys: string[],
+): void {
+  // publicItems never shipped as a flat key; reading one as absent would silently
+  // make every item internal.
+  if ('libraryInterfacePublicItems' in holder) {
+    throw new AvoError(
+      `libraryInterfacePublicItems${context} is not supported — set libraryInterface.publicItems instead`,
+    );
+  }
+  if (holder.libraryInterface !== undefined) {
+    validateNestedLibraryInterface(
+      holder.libraryInterface,
+      holder,
+      context,
+      allowedKeys,
+    );
+  }
+  if (holder.libraryInterfaceFileFilter !== undefined) {
+    parseLibraryInterfaceFileFilter(holder.libraryInterfaceFileFilter, context);
+  }
+}
+
 export function validateAvoJson(json: AvoJson): Promise<AvoJson> {
   if (avoNeedsUpdate(json)) {
     throw new AvoError('Your avo CLI is outdated, please update');
@@ -888,25 +1020,17 @@ export function validateAvoJson(json: AvoJson): Promise<AvoJson> {
 
   // Validated here rather than on the pull path so a malformed persisted value is
   // reported by every command that loads avo.json, not only by 'avo pull'.
-  if (json.libraryInterfaceFileFilter !== undefined) {
-    parseLibraryInterfaceFileFilter(
-      json.libraryInterfaceFileFilter,
-      ` in ${file('avo.json')}`,
-    );
-  }
+  validateLibraryInterfaceSettings(
+    json,
+    ` in ${file('avo.json')}`,
+    TOP_LEVEL_LIBRARY_INTERFACE_KEYS,
+  );
   (json.sources ?? []).forEach((source) => {
-    if (source.libraryInterfaceFileFilter !== undefined) {
-      parseLibraryInterfaceFileFilter(
-        source.libraryInterfaceFileFilter,
-        ` on source '${source.name}' in ${file('avo.json')}`,
-      );
-    }
-    if (source.libraryInterfacePublicItems !== undefined) {
-      parseLibraryInterfacePublicItems(
-        source.libraryInterfacePublicItems,
-        ` on source '${source.name}' in ${file('avo.json')}`,
-      );
-    }
+    validateLibraryInterfaceSettings(
+      source,
+      ` on source '${source.name}' in ${file('avo.json')}`,
+      SOURCE_LIBRARY_INTERFACE_KEYS,
+    );
   });
 
   // augment the latest major version into avo.json
@@ -947,7 +1071,7 @@ function fetchBranches(json: AvoJson): Promise<Branch[]> {
 }
 
 // Spreads the whole json so top-level state the CLI does not know about — the
-// persisted libraryInterfaceFileFilter among it — survives a branch switch.
+// persisted libraryInterface settings among it — survives a branch switch.
 export function applyBranchToAvoJson(json: AvoJson, branch: Branch): AvoJson {
   return {
     ...json,
@@ -1045,17 +1169,17 @@ export function buildResolvedAvoJson(head: AvoJson): AvoJson {
 // setting, not a structural conflict — it warns, and must NEVER reach
 // findUnresolvableAvoJsonConflict, which hard-blocks the pull.
 export function buildAvoJsonFilterMismatchWarning(
-  head: Pick<AvoJson, 'libraryInterfaceFileFilter'>,
-  incoming: Pick<AvoJson, 'libraryInterfaceFileFilter'>,
+  head: LibraryInterfaceHolder,
+  incoming: LibraryInterfaceHolder,
 ): string | null {
-  if (head.libraryInterfaceFileFilter === incoming.libraryInterfaceFileFilter) {
+  const headFilter = libraryInterfaceSettingsOf(head).fileFilter;
+  const incomingFilter = libraryInterfaceSettingsOf(incoming).fileFilter;
+  if (headFilter === incomingFilter) {
     return null;
   }
   return `avo.json conflict: kept libraryInterfaceFileFilter '${
-    head.libraryInterfaceFileFilter ?? 'all'
-  }' from your branch (incoming had '${
-    incoming.libraryInterfaceFileFilter ?? 'all'
-  }')`;
+    headFilter ?? 'all'
+  }' from your branch (incoming had '${incomingFilter ?? 'all'}')`;
 }
 
 export function findUnresolvableAvoJsonConflict(
@@ -1742,6 +1866,7 @@ export function buildPullRequestBody(
         source,
         json,
       });
+      const { publicItems } = libraryInterfaceSettingsOf(source);
       return {
         id: source.id,
         path: source.path,
@@ -1754,11 +1879,9 @@ export function buildPullRequestBody(
         ...(libraryInterfaceSharedModule === undefined
           ? {}
           : { libraryInterfaceSharedModule }),
-        ...(source.libraryInterfacePublicItems === undefined
+        ...(publicItems === undefined
           ? {}
-          : {
-              libraryInterfacePublicItems: source.libraryInterfacePublicItems,
-            }),
+          : { libraryInterfacePublicItems: publicItems }),
       };
     }),
     force: json.force ?? false,
@@ -2560,7 +2683,7 @@ if (isMainModule) {
                     json.schema.name,
                   )} (${file('avo.json')} exists)`,
                 );
-                if (json.libraryInterfaceFileFilter === undefined) {
+                if (libraryInterfaceSettingsOf(json).fileFilter === undefined) {
                   report.info(buildLibraryInterfaceFileFilterInfoLine());
                 }
                 return Promise.resolve();
