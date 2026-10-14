@@ -950,6 +950,27 @@ describe('libraryInterfaceFileFilter', () => {
       );
     });
 
+    it('rejects a list longer than 1000 entries, giving the count', () => {
+      const json: any = baseJson();
+      json.sources[1].libraryInterfacePublicItems = Array.from(
+        { length: 1001 },
+        (_, index) => `Item${index}`,
+      );
+
+      expect(() => validateAvoJson(json)).toThrow(
+        "Invalid libraryInterfacePublicItems on source 'iOS' in avo.json — lists 1001 entries; at most 1000 are allowed",
+      );
+    });
+
+    it('accepts a list of exactly 1000 entries', async () => {
+      const json: any = baseJson();
+      const items = Array.from({ length: 1000 }, (_, index) => `Item${index}`);
+      json.sources[1].libraryInterfacePublicItems = items;
+
+      const validated: any = await validateAvoJson(json);
+      expect(validated.sources[1].libraryInterfacePublicItems).toEqual(items);
+    });
+
     it('names a non-string entry by its index', () => {
       const json: any = baseJson();
       json.sources[1].libraryInterfacePublicItems = ['initAvo', 42];

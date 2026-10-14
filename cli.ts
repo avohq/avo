@@ -537,6 +537,9 @@ export function parseLibraryInterfaceFileFilter(
   );
 }
 
+// Matches the pull endpoint's cap, which rejects longer lists with a generic error.
+const LIBRARY_INTERFACE_PUBLIC_ITEMS_MAX = 1000;
+
 export function parseLibraryInterfacePublicItems(
   value: unknown,
   context = '',
@@ -544,6 +547,11 @@ export function parseLibraryInterfacePublicItems(
   if (!Array.isArray(value)) {
     throw new AvoError(
       `Invalid libraryInterfacePublicItems${context} — must be an array of non-empty strings`,
+    );
+  }
+  if (value.length > LIBRARY_INTERFACE_PUBLIC_ITEMS_MAX) {
+    throw new AvoError(
+      `Invalid libraryInterfacePublicItems${context} — lists ${value.length} entries; at most ${LIBRARY_INTERFACE_PUBLIC_ITEMS_MAX} are allowed`,
     );
   }
   // Names are matched exactly, so a padded entry would only come back as an
