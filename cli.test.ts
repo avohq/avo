@@ -882,6 +882,334 @@ describe('libraryInterfaceFileFilter', () => {
     });
   });
 
+  describe('libraryInterface.publicItems', () => {
+    it('forwards a valid per-source list on pull, as the flat wire key', () => {
+      const json: any = baseJson();
+      json.sources[1].libraryInterface = {
+        publicItems: ['AvoTypes.Platform', 'initAvo'],
+      };
+
+      const body = buildPullRequestBody(json, json.sources);
+
+      expect(body.sources[1].libraryInterfacePublicItems).toEqual([
+        'AvoTypes.Platform',
+        'initAvo',
+      ]);
+      expect('libraryInterfacePublicItems' in body.sources[0]).toBe(false);
+    });
+
+    it('omits the key entirely when unset', () => {
+      const json: any = baseJson();
+
+      const body = buildPullRequestBody(json, json.sources);
+
+      expect(
+        body.sources.map((s: any) => 'libraryInterfacePublicItems' in s),
+      ).toEqual([false, false]);
+    });
+
+    it('accepts a valid list in validateAvoJson', async () => {
+      const json: any = baseJson();
+      json.sources[1].libraryInterface = { publicItems: ['LoginSuccessEvent'] };
+
+      const validated: any = await validateAvoJson(json);
+      expect(validated.sources[1].libraryInterface.publicItems).toEqual([
+        'LoginSuccessEvent',
+      ]);
+    });
+
+    it.each([
+      ['a non-array', 'initAvo'],
+      ['an array with a non-string', ['initAvo', 42]],
+      ['an array with an empty string', ['initAvo', '']],
+    ])('rejects %s, naming the source', (_label, value) => {
+      const json: any = baseJson();
+      json.sources[1].libraryInterface = { publicItems: value };
+
+      expect(() => validateAvoJson(json)).toThrow(
+        /Invalid libraryInterface.publicItems on source 'iOS'.*must be an array of non-empty strings/,
+      );
+    });
+
+    it.each([
+      ['a whitespace-only entry', ['initAvo', '   '], 1, "'   '"],
+      ['an entry with leading whitespace', [' initAvo'], 0, "' initAvo'"],
+      [
+        'an entry with trailing whitespace',
+        ['A', 'B', 'initAvo\t'],
+        2,
+        "'initAvo\t'",
+      ],
+    ])('rejects %s, naming the bad entry', (_label, value, index, shown) => {
+      const json: any = baseJson();
+      json.sources[1].libraryInterface = { publicItems: value };
+
+      expect(() => validateAvoJson(json)).toThrow(
+        `Invalid libraryInterface.publicItems on source 'iOS' in avo.json — must be an array of non-empty strings without surrounding whitespace; entry ${index} is ${shown}`,
+      );
+    });
+
+    it('rejects a list longer than 1000 entries, giving the count', () => {
+      const json: any = baseJson();
+      json.sources[1].libraryInterface = {
+        publicItems: Array.from({ length: 1001 }, (_, index) => `Item${index}`),
+      };
+
+      expect(() => validateAvoJson(json)).toThrow(
+        "Invalid libraryInterface.publicItems on source 'iOS' in avo.json — lists 1001 entries; at most 1000 are allowed",
+      );
+    });
+
+    it('accepts a list of exactly 1000 entries', async () => {
+      const json: any = baseJson();
+      const items = Array.from({ length: 1000 }, (_, index) => `Item${index}`);
+      json.sources[1].libraryInterface = { publicItems: items };
+
+      const validated: any = await validateAvoJson(json);
+      expect(validated.sources[1].libraryInterface.publicItems).toEqual(items);
+    });
+
+    it('names a non-string entry by its index', () => {
+      const json: any = baseJson();
+      json.sources[1].libraryInterface = { publicItems: ['initAvo', 42] };
+
+      expect(() => validateAvoJson(json)).toThrow(/entry 1 is 42$/);
+    });
+  });
+
+  describe('nested libraryInterface settings', () => {
+    it('resolves nested top-level settings like the flat keys, sending flat wire keys', () => {
+      const json: any = baseJson();
+      json.libraryInterface = {
+        fileFilter: 'events-only',
+        sharedModule: '@acme/analytics',
+      };
+
+      const body = buildPullRequestBody(json, json.sources);
+
+      expect(
+        body.sources.map((s: any) => [
+          s.libraryInterfaceFileFilter,
+          s.libraryInterfaceSharedModule,
+        ]),
+      ).toEqual([
+        ['events-only', '@acme/analytics'],
+        ['events-only', '@acme/analytics'],
+      ]);
+    });
+
+    it('lets a nested per-source setting override a flat top-level one', () => {
+      const json: any = baseJson();
+      json.libraryInterfaceFileFilter = 'events-only';
+      json.libraryInterfaceSharedModule = '@acme/analytics';
+      json.sources[1].libraryInterface = {
+        fileFilter: 'interface-only',
+        sharedModule: 'com.acme.analytics',
+      };
+
+      const body = buildPullRequestBody(json, json.sources);
+
+      expect(
+        body.sources.map((s: any) => [
+          s.libraryInterfaceFileFilter,
+          s.libraryInterfaceSharedModule,
+        ]),
+      ).toEqual([
+        ['events-only', '@acme/analytics'],
+        ['interface-only', 'com.acme.analytics'],
+      ]);
+    });
+
+    it('lets the per-run flag override a nested setting', () => {
+      const json: any = baseJson();
+      json.sources[1].libraryInterface = { fileFilter: 'events-only' };
+
+      const body = buildPullRequestBody(json, json.sources, 'all');
+
+      expect(body.sources[1].libraryInterfaceFileFilter).toBe('all');
+    });
+
+    it('accepts nested settings at both levels in validateAvoJson', async () => {
+      const json: any = baseJson();
+      json.libraryInterface = { fileFilter: 'events-only' };
+      json.sources[1].libraryInterface = {
+        fileFilter: 'interface-only',
+        sharedModule: 'com.acme.analytics',
+        publicItems: ['initAvo'],
+      };
+
+      const validated: any = await validateAvoJson(json);
+      expect(validated.libraryInterface).toEqual({ fileFilter: 'events-only' });
+      expect(validated.sources[1].libraryInterface).toEqual(
+        json.sources[1].libraryInterface,
+      );
+    });
+
+    it.each([
+      ['libraryInterfaceFileFilter', 'events-only'],
+      ['libraryInterfaceSharedModule', '@acme/analytics'],
+    ])(
+      'rejects the nested object next to a flat %s at the top level',
+      (key, value) => {
+        const json: any = baseJson();
+        json.libraryInterface = { fileFilter: 'events-only' };
+        json[key] = value;
+
+        expect(() => validateAvoJson(json)).toThrow(
+          `Set either libraryInterface or ${key} in avo.json, not both`,
+        );
+      },
+    );
+
+    it('rejects the nested object next to a flat key on the same source', () => {
+      const json: any = baseJson();
+      json.sources[1].libraryInterface = { fileFilter: 'events-only' };
+      json.sources[1].libraryInterfaceFileFilter = 'events-only';
+
+      expect(() => validateAvoJson(json)).toThrow(
+        "Set either libraryInterface or libraryInterfaceFileFilter on source 'iOS' in avo.json, not both",
+      );
+    });
+
+    it('allows the flat form at one level and the nested form at another', async () => {
+      const json: any = baseJson();
+      json.libraryInterfaceFileFilter = 'events-only';
+      json.sources[1].libraryInterface = { publicItems: ['initAvo'] };
+
+      await expect(validateAvoJson(json)).resolves.toBeDefined();
+    });
+
+    it.each([
+      ['a string', 'events-only'],
+      ['an array', ['events-only']],
+      ['null', null],
+    ])('rejects %s in place of the object', (_label, value) => {
+      const json: any = baseJson();
+      json.sources[1].libraryInterface = value;
+
+      expect(() => validateAvoJson(json)).toThrow(
+        "Invalid libraryInterface on source 'iOS' in avo.json — must be an object with fileFilter, sharedModule or publicItems",
+      );
+    });
+
+    it('rejects an unknown key, naming it and the allowed ones', () => {
+      const json: any = baseJson();
+      json.sources[1].libraryInterface = { filter: 'events-only' };
+
+      expect(() => validateAvoJson(json)).toThrow(
+        "Unknown key 'filter' in libraryInterface on source 'iOS' in avo.json — allowed keys are fileFilter, sharedModule, publicItems",
+      );
+    });
+
+    it('rejects publicItems at the top level, since it is per source', () => {
+      const json: any = baseJson();
+      json.libraryInterface = { publicItems: ['initAvo'] };
+
+      expect(() => validateAvoJson(json)).toThrow(
+        "Unknown key 'publicItems' in libraryInterface in avo.json — allowed keys are fileFilter, sharedModule",
+      );
+    });
+
+    it('rejects an invalid nested fileFilter under its nested name', () => {
+      const json: any = baseJson();
+      json.sources[1].libraryInterface = { fileFilter: 'interfaceonly' };
+
+      expect(() => validateAvoJson(json)).toThrow(
+        "Invalid libraryInterface.fileFilter 'interfaceonly' on source 'iOS' in avo.json",
+      );
+    });
+
+    it('rejects a nested sharedModule that is not a non-empty string', () => {
+      const json: any = baseJson();
+      json.libraryInterface = { sharedModule: 42 };
+
+      expect(() => validateAvoJson(json)).toThrow(
+        'Invalid libraryInterface.sharedModule in avo.json — must be a non-empty string',
+      );
+    });
+
+    it.each([
+      ['an empty string', ''],
+      ['a number', 42],
+    ])(
+      'rejects %s as a flat libraryInterfaceSharedModule, like the nested one',
+      (_label, value) => {
+        const json: any = baseJson();
+        json.sources[1].libraryInterfaceSharedModule = value;
+
+        expect(() => validateAvoJson(json)).toThrow(
+          "Invalid libraryInterfaceSharedModule on source 'iOS' in avo.json — must be a non-empty string",
+        );
+      },
+    );
+
+    // publicItems never shipped in the flat form, so a flat key is a mistake to
+    // report rather than a value to forward or silently drop.
+    it('rejects a flat libraryInterfacePublicItems, pointing at the nested key', () => {
+      const json: any = baseJson();
+      json.sources[1].libraryInterfacePublicItems = ['initAvo'];
+
+      expect(() => validateAvoJson(json)).toThrow(
+        "libraryInterfacePublicItems on source 'iOS' in avo.json is not supported — set libraryInterface.publicItems instead",
+      );
+    });
+
+    it('keeps the nested object through a branch switch and conflict resolution', () => {
+      const json: any = baseJson();
+      json.libraryInterface = { fileFilter: 'events-only' };
+      json.sources[1].libraryInterface = { publicItems: ['initAvo'] };
+
+      const switched: any = applyBranchToAvoJson(json, {
+        id: 'branch-1',
+        name: 'feature',
+      });
+      const resolved: any = buildResolvedAvoJson(json);
+
+      expect([
+        switched.libraryInterface,
+        switched.sources[1].libraryInterface,
+        resolved.libraryInterface,
+        resolved.sources[1].libraryInterface,
+      ]).toEqual([
+        { fileFilter: 'events-only' },
+        { publicItems: ['initAvo'] },
+        { fileFilter: 'events-only' },
+        { publicItems: ['initAvo'] },
+      ]);
+    });
+
+    it('compares nested and flat filters alike when warning about a merge mismatch', () => {
+      expect([
+        buildAvoJsonFilterMismatchWarning(
+          { libraryInterface: { fileFilter: 'events-only' } } as any,
+          { libraryInterfaceFileFilter: 'events-only' },
+        ),
+        buildAvoJsonFilterMismatchWarning(
+          { libraryInterface: { fileFilter: 'events-only' } } as any,
+          { libraryInterface: { fileFilter: 'interface-only' } } as any,
+        ),
+      ]).toEqual([
+        null,
+        "avo.json conflict: kept libraryInterface.fileFilter 'events-only' from your branch (incoming had 'interface-only')",
+      ]);
+    });
+
+    it('names the setting as the kept side writes it, else as the incoming side does', () => {
+      expect([
+        buildAvoJsonFilterMismatchWarning(
+          { libraryInterfaceFileFilter: 'events-only' },
+          { libraryInterface: { fileFilter: 'interface-only' } } as any,
+        ),
+        buildAvoJsonFilterMismatchWarning({}, {
+          libraryInterface: { fileFilter: 'interface-only' },
+        } as any),
+      ]).toEqual([
+        "avo.json conflict: kept libraryInterfaceFileFilter 'events-only' from your branch (incoming had 'interface-only')",
+        "avo.json conflict: kept libraryInterface.fileFilter 'all' from your branch (incoming had 'interface-only')",
+      ]);
+    });
+  });
+
   describe('persistence across write paths', () => {
     useTempCwd();
 
@@ -1068,8 +1396,10 @@ describe('avo init and libraryInterfaceFileFilter', () => {
     it('names both settings and their values and where they go', () => {
       const line = buildLibraryInterfaceFileFilterInfoLine();
 
-      expect(line).toContain('libraryInterfaceFileFilter');
-      expect(line).toContain('libraryInterfaceSharedModule');
+      expect(line).toContain('libraryInterface');
+      expect(line).toContain('fileFilter');
+      expect(line).toContain('sharedModule');
+      expect(line).not.toContain('libraryInterfaceFileFilter');
       expect(line).toContain('interface-only');
       expect(line).toContain('events-only');
       expect(line).toContain('all');
@@ -1095,9 +1425,10 @@ describe('avo init and libraryInterfaceFileFilter', () => {
       expect(promptFn).not.toHaveBeenCalled();
       expect('libraryInterfaceFileFilter' in json).toBe(false);
       expect('libraryInterfaceSharedModule' in json).toBe(false);
+      expect('libraryInterface' in json).toBe(false);
       const infoLines = reportInfo.mock.calls.map((c) => String(c[0])).join('\n');
-      expect(infoLines).toContain('libraryInterfaceFileFilter');
-      expect(infoLines).toContain('libraryInterfaceSharedModule');
+      expect(infoLines).toContain('libraryInterface.fileFilter');
+      expect(infoLines).toContain('libraryInterface.sharedModule');
     });
 
     it('multi-workspace: prompts ONLY for the workspace picker, omits both keys', async () => {
