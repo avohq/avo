@@ -1,5 +1,9 @@
 ## Unreleased
 
+Keep the Inspector SDK's logs out of the CLI's output when `AVO_INSPECTOR_ENV` is `dev` or `staging`, unless `--verbose` is set
+Accept `AVO_INSPECTOR_ENV` in any case, and warn instead of silently using prod when it isn't `dev`, `staging` or `prod`
+Encrypt property values sent to Inspector in dev and staging with the workspace's new public key
+
 ## 3.7.0-beta.0 (2026-10-15)
 
 Group the library interface settings in `avo.json` under a `libraryInterface` object (`fileFilter`, `sharedModule`, and per source `publicItems`). The flat `libraryInterfaceFileFilter` and `libraryInterfaceSharedModule` keys still work, but one level can't set both forms

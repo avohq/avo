@@ -451,11 +451,36 @@ const customAnalyticsDestination = {
 // Set AVO_INSPECTOR_ENV=dev (or staging) to validate the CLI's own events
 // against the tracking plan and send their property values, encrypted with the
 // public key below, so value issues show up in the Inspector debugger. Prod,
-// the default, skips both and sends schemas only.
-const inspectorEnv =
-  Object.values(AvoInspectorEnv).find(
-    (env) => env === process.env.AVO_INSPECTOR_ENV,
-  ) ?? AvoInspectorEnv.Prod;
+// the default, skips both and sends schemas only. Any case works; anything else
+// falls back to prod with a warning, so a typo doesn't silently turn this off.
+type InspectorEnv = (typeof AvoInspectorEnv)[keyof typeof AvoInspectorEnv];
+
+export function resolveInspectorEnv(value: string | undefined): {
+  env: InspectorEnv;
+  warning?: string;
+} {
+  const name = (value ?? '').trim().toLowerCase();
+  const env = Object.values(AvoInspectorEnv).find((known) => known === name);
+  if (env !== undefined) {
+    return { env };
+  }
+  if (name === '') {
+    return { env: AvoInspectorEnv.Prod };
+  }
+  return {
+    env: AvoInspectorEnv.Prod,
+    warning: `Unknown AVO_INSPECTOR_ENV '${value}' — must be one of ${Object.values(
+      AvoInspectorEnv,
+    ).join(', ')}; using prod`,
+  };
+}
+
+const { env: inspectorEnv, warning: inspectorEnvWarning } = resolveInspectorEnv(
+  process.env.AVO_INSPECTOR_ENV,
+);
+if (inspectorEnvWarning) {
+  report.warn(inspectorEnvWarning);
+}
 
 const inspector = new AvoInspector({
   apiKey: '3UWtteG9HenZ825cYoYr',
@@ -463,8 +488,12 @@ const inspector = new AvoInspector({
   version: pkg.version,
   appName: 'Avo CLI',
   publicEncryptionKey:
-    '02c7bbbef4b66c8e2324918d35b59eb4949c32a7d6f33b14efa44dd08d410466f0',
+    '02d964a2908b74edea5045d653cf409c300a402778010e85e17861a3716e92d6c1',
 });
+// Dev turns the SDK's logs on, which would land in the middle of the CLI's own
+// output, raw property values included. --verbose turns them back on (see the
+// middleware on the yargs setup).
+inspector.enableLogging(false);
 
 // setup Avo analytics
 Avo.initAvo(
@@ -2667,6 +2696,13 @@ if (isMainModule) {
         default: false,
         describe: 'make output more verbose',
         type: 'boolean',
+      })
+      .middleware((argv) => {
+        // Not in prod: there the SDK logs say nothing useful to a user, and they
+        // print raw property values.
+        if (argv.verbose && inspectorEnv !== AvoInspectorEnv.Prod) {
+          inspector.enableLogging(true);
+        }
       })
       .command({
         command: 'track-install',
