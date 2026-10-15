@@ -448,11 +448,22 @@ const customAnalyticsDestination = {
   setUserProperties: () => undefined, // noop
 };
 
+// Set AVO_INSPECTOR_ENV=dev (or staging) to validate the CLI's own events
+// against the tracking plan and send their property values, encrypted with the
+// public key below, so value issues show up in the Inspector debugger. Prod,
+// the default, skips both and sends schemas only.
+const inspectorEnv =
+  Object.values(AvoInspectorEnv).find(
+    (env) => env === process.env.AVO_INSPECTOR_ENV,
+  ) ?? AvoInspectorEnv.Prod;
+
 const inspector = new AvoInspector({
   apiKey: '3UWtteG9HenZ825cYoYr',
-  env: AvoInspectorEnv.Prod,
+  env: inspectorEnv,
   version: pkg.version,
   appName: 'Avo CLI',
+  publicEncryptionKey:
+    '02c7bbbef4b66c8e2324918d35b59eb4949c32a7d6f33b14efa44dd08d410466f0',
 });
 
 // setup Avo analytics

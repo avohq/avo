@@ -23,6 +23,7 @@
     "format": "prettier --write cli.ts",
     "check-format": "prettier --check cli.ts",
     "build": "tsc",
+    "dev": "tsc && AVO_INSPECTOR_ENV=dev node cli.js",
     "test": "node --experimental-vm-modules node_modules/jest/bin/jest.js"
   },
   "files": [
@@ -43,7 +44,7 @@
     "load-json-file": "^7.0.1",
     "log-symbols": "^5.1.0",
     "minimatch": "^7.0.0",
-    "node-avo-inspector": "^1.0.1",
+    "node-avo-inspector": "^1.2.0",
     "open": "^9.1.0",
     "ora": "^6.0.1",
     "pify": "^6.0.0",
