@@ -38,6 +38,7 @@ import {
   collectStaleSuppressedFiles,
   buildStaleSuppressedFileWarning,
   buildSourcePaths,
+  resolveInspectorEnv,
 } from './cli.js';
 
 // Each of these suites runs codegen against the real filesystem, so they need an
@@ -1794,6 +1795,29 @@ describe('buildSourcePaths', () => {
     ).toEqual({
       path: path.join('library', 'Avo.kt'),
       interfacePath: path.join('library', 'AvoInterface.kt'),
+    });
+  });
+});
+
+describe('resolveInspectorEnv', () => {
+  it('defaults to prod, without a warning, when AVO_INSPECTOR_ENV is unset or blank', () => {
+    expect(resolveInspectorEnv(undefined)).toEqual({ env: 'prod' });
+    expect(resolveInspectorEnv('')).toEqual({ env: 'prod' });
+    expect(resolveInspectorEnv('  ')).toEqual({ env: 'prod' });
+  });
+
+  it('takes dev, staging and prod in any case', () => {
+    expect(resolveInspectorEnv('dev')).toEqual({ env: 'dev' });
+    expect(resolveInspectorEnv('DEV')).toEqual({ env: 'dev' });
+    expect(resolveInspectorEnv(' Staging ')).toEqual({ env: 'staging' });
+    expect(resolveInspectorEnv('prod')).toEqual({ env: 'prod' });
+  });
+
+  it('falls back to prod with a warning naming the value for anything else', () => {
+    expect(resolveInspectorEnv('development')).toEqual({
+      env: 'prod',
+      warning:
+        "Unknown AVO_INSPECTOR_ENV 'development' — must be one of prod, dev, staging; using prod",
     });
   });
 });

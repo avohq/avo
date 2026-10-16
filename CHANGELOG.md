@@ -1,7 +1,11 @@
 ## Unreleased
 
+## 3.7.0 (2026-10-16)
+
 Group the library interface settings in `avo.json` under a `libraryInterface` object (`fileFilter`, `sharedModule`, and per source `publicItems`). The flat `libraryInterfaceFileFilter` and `libraryInterfaceSharedModule` keys still work, but one level can't set both forms
+Upgrade everyone who runs `avo pull` for a workspace, CI included, to 3.7.0 before moving settings under `libraryInterface`. Older CLIs ignore the object and pull with fileFilter `all`
 Add per-source `libraryInterface.publicItems` to keep chosen items public in the Swift/Kotlin library interface app file
+Validate the CLI's own analytics events and send encrypted property values to Avo Inspector when `AVO_INSPECTOR_ENV` is `dev` or `staging` (any case; any other value warns and uses prod). The Inspector SDK's logs show only with `--verbose`
 
 ## 3.6.0 (2026-08-24)
 
