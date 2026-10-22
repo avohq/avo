@@ -31,9 +31,9 @@
 //   --out <file>            also write the markdown to this file
 //
 // The gate (gated shape only, at the default --heap and --scale; exit 1 if it
-// fails): every candidate run exits 0, finds every event and prints the
-// oversized-file warning, and every baseline run runs out of memory. Wall time
-// and peak RSS are recorded, not gated.
+// fails): every candidate run exits 0, finds all 20 of the repo's events and
+// prints the oversized-file warning, and every baseline run runs out of
+// memory. Wall time and peak RSS are recorded, not gated.
 //
 // Each run is `/usr/bin/time -l <node> --max-old-space-size=<heap> <cli.js>
 // status` (macOS: time reports peak RSS in bytes), with FORCE_COLOR=0,
@@ -80,6 +80,11 @@ const ofCap = (sizeCap, percent) => Math.floor((sizeCap * percent) / 100);
 // Enough files just under the cap to keep every concurrent read near the cap.
 const NEAR_CAP_FILE_COUNT = 32;
 const NEAR_CAP_PERCENT = 99;
+
+// Opens each near-cap file. `…` is outside Latin-1, so V8 holds the file read
+// as a two-byte string, the worst case the memory budget allows for; ASCII
+// filler alone would fill only half of it.
+const NEAR_CAP_HEAD = '// Generated catalog…\n';
 
 // Over the cap. Each calls an event that is also called from a file under the
 // cap, so no event's only usage is in an oversized file.
@@ -278,7 +283,9 @@ export function generateRepo(
         'generated',
         `catalog-${pad(index, 2)}.ts`,
       ),
-      `import Avo from '../../Avo';\n\nAvo.${events[index % events.length]}({});\n`,
+      `${NEAR_CAP_HEAD}import Avo from '../../Avo';\n\nAvo.${
+        events[index % events.length]
+      }({});\n`,
       ofCap(sizeCap, NEAR_CAP_PERCENT),
       nearCapFiller,
     );
@@ -405,11 +412,13 @@ export function gateFailures(runs, { heap, scale }) {
     }
     return [
       ...(run.exitCode === 0 ? [] : [`${who} exited ${run.exitCode}, not 0`]),
-      ...(run.eventsTotal !== null &&
-      run.eventsTotal > 0 &&
-      run.eventsSeen === run.eventsTotal
+      // Against the repo's own count, so a build that read only part of the
+      // event map can't pass.
+      ...(run.eventsSeen === EVENT_COUNT && run.eventsTotal === EVENT_COUNT
         ? []
-        : [`${who} found ${run.eventsSeen} of ${run.eventsTotal} events`]),
+        : [
+            `${who} found ${run.eventsSeen} of ${run.eventsTotal} events, not ${EVENT_COUNT} of ${EVENT_COUNT}`,
+          ]),
       ...(run.warnings.some((warning) =>
         warning.includes(`over the ${SIZE_CAP_BYTES / MIB} MiB size cap`),
       )
