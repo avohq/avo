@@ -510,6 +510,25 @@ function exitAfterInspectorFlush(code: number): Promise<never> {
   return inspector.flush(2000).then(() => process.exit(code));
 }
 
+// The process-wide 'unhandledRejection' handler, registered when cli.js runs as
+// the avo command.
+export function exitOnUnhandledRejection(err: unknown): Promise<never> {
+  cancelWait();
+
+  if (!(err instanceof Error) && !(err instanceof AvoError)) {
+    report.error(
+      new AvoError(`Promise rejected with value: ${util.inspect(err)}`),
+    );
+  } else {
+    // @ts-ignore
+    report.error(err.message);
+  }
+  // @ts-ignore
+  // console.error(err.stack);
+
+  return exitAfterInspectorFlush(1);
+}
+
 type Branch = {
   name: string;
   id: string;
@@ -2218,7 +2237,7 @@ function getSource(argv, json: AvoJson): Promise<[string, AvoJson]> {
   return Promise.resolve([argv.source, json]);
 }
 
-function status(source: string, json, argv: any): void {
+export function status(source: string, json, argv: any): void {
   let sources = source
     ? json.sources.filter((s) => matchesSource(s, source))
     : json.sources;
@@ -3511,21 +3530,6 @@ if (isMainModule) {
   // catch unhandled promises
 
   if (isMainModule) {
-    process.on('unhandledRejection', (err) => {
-      cancelWait();
-
-      if (!(err instanceof Error) && !(err instanceof AvoError)) {
-        report.error(
-          new AvoError(`Promise rejected with value: ${util.inspect(err)}`),
-        );
-      } else {
-        // @ts-ignore
-        report.error(err.message);
-      }
-      // @ts-ignore
-      // console.error(err.stack);
-
-      exitAfterInspectorFlush(1);
-    });
+    process.on('unhandledRejection', exitOnUnhandledRejection);
   }
 }
