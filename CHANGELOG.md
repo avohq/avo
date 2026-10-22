@@ -1,6 +1,6 @@
 ## Unreleased
 
-Upgrade the Inspector SDK to node-avo-inspector 2.0.0-beta.2
+Upgrade the Inspector SDK to node-avo-inspector 2.0.0
 Send the CLI's own Inspector event before exiting with an error (not logged in, events missing in `avo status`, or an unexpected error), where it used to be lost
 
 ## 3.7.0 (2026-10-16)
