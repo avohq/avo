@@ -2414,9 +2414,10 @@ type StatusFileOutcome =
   | {
       kind: 'analysed';
       filePath: string;
-      // Per matching source index, the number of lines using each of its
-      // events, in event map order.
-      usageCounts: Map<number, number[]>;
+      // Per matching source index, [event map index, number of lines using
+      // the event] for each event the file uses. Kept until the run ends for
+      // every analysed file, so events it doesn't use take no room.
+      usageCounts: Map<number, [number, number][]>;
     };
 
 function isInsideFolder(folder: string, filePath: string): boolean {
@@ -2461,8 +2462,11 @@ function analyseFile(
             usageCounts: new Map(
               sourceIndexes.map((sourceIndex) => [
                 sourceIndex,
-                analyses[sourceIndex].eventPatterns.map(
-                  (re) => findMatches(data, re).length,
+                analyses[sourceIndex].eventPatterns.flatMap(
+                  (re, eventIndex) => {
+                    const count = findMatches(data, re).length;
+                    return count > 0 ? [[eventIndex, count]] : [];
+                  },
                 ),
               ]),
             ),
@@ -2569,17 +2573,18 @@ export function status(source: string, json, argv: any): Promise<void> {
             );
           }
 
+          const usages: EventUsage[][] = analysis.eventMap.map(() => []);
+          analysedFiles.forEach(({ filePath, usageCounts }) => {
+            usageCounts.get(sourceIndex).forEach(([eventIndex, count]) => {
+              usages[eventIndex].push({ filePath, count });
+            });
+          });
           return {
             ...source,
             results: Object.fromEntries(
               analysis.eventMap.map((eventName, eventIndex) => [
                 eventName,
-                analysedFiles
-                  .map(({ filePath, usageCounts }) => ({
-                    filePath,
-                    count: usageCounts.get(sourceIndex)[eventIndex],
-                  }))
-                  .filter(({ count }) => count > 0),
+                usages[eventIndex],
               ]),
             ),
           };
