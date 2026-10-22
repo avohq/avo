@@ -10,6 +10,8 @@ import {
   jest,
 } from '@jest/globals';
 import os from 'os';
+import Configstore from 'configstore';
+import { AvoInspector } from 'node-avo-inspector';
 import {
   getEventsDirectoryPath,
   isFilePerEventMode,
@@ -39,6 +41,8 @@ import {
   buildStaleSuppressedFileWarning,
   buildSourcePaths,
   resolveInspectorEnv,
+  status,
+  exitOnUnhandledRejection,
 } from './cli.js';
 
 // Each of these suites runs codegen against the real filesystem, so they need an
@@ -1818,6 +1822,117 @@ describe('resolveInspectorEnv', () => {
       env: 'prod',
       warning:
         "Unknown AVO_INSPECTOR_ENV 'development' — must be one of prod, dev, staging; using prod",
+    });
+  });
+});
+
+describe('Inspector flush before an error exit', () => {
+  // node-avo-inspector 2.0 sends the rest of its batch on 'beforeExit', which
+  // process.exit() skips. Each error exit that can follow the command's Inspector
+  // event must finish inspector.flush() before it exits, or that event is lost.
+  const avoTs = fs.readFileSync(path.resolve('Avo.ts'), 'utf8');
+  let flushStarted: Promise<void>;
+  let releaseFlush: () => void;
+  let flushSpy: ReturnType<typeof jest.spyOn>;
+  let exitSpy: ReturnType<typeof jest.spyOn>;
+  let logSpy: ReturnType<typeof jest.spyOn>;
+
+  beforeEach(() => {
+    let markStarted: () => void = () => undefined;
+    flushStarted = new Promise((resolve) => {
+      markStarted = resolve;
+    });
+    const flushDone = new Promise<boolean>((resolve) => {
+      releaseFlush = () => resolve(true);
+    });
+    flushSpy = jest
+      .spyOn(AvoInspector.prototype, 'flush')
+      .mockImplementation(() => {
+        markStarted();
+        return flushDone;
+      });
+    exitSpy = jest
+      .spyOn(process, 'exit')
+      .mockImplementation((() => undefined) as never);
+    logSpy = jest.spyOn(console, 'log').mockImplementation(() => undefined);
+  });
+
+  afterEach(() => {
+    jest.restoreAllMocks();
+  });
+
+  // Holds the exit's flush open, checks nothing exited during it, then lets it end.
+  const expectExitAfterFlush = async (): Promise<void> => {
+    await flushStarted;
+    expect(flushSpy).toHaveBeenCalledWith(2000);
+    expect(exitSpy).not.toHaveBeenCalled();
+
+    releaseFlush();
+    await new Promise((resolve) => {
+      setImmediate(resolve);
+    });
+    expect(exitSpy).toHaveBeenCalledTimes(1);
+    expect(exitSpy).toHaveBeenCalledWith(1);
+  };
+
+  describe('when the command needs a login', () => {
+    useTempCwd();
+    let previousToken: string | undefined;
+
+    beforeEach(() => {
+      previousToken = process.env.AVO_TOKEN;
+      delete process.env.AVO_TOKEN;
+      jest.spyOn(Configstore.prototype, 'get').mockReturnValue(undefined);
+    });
+
+    afterEach(() => {
+      if (previousToken !== undefined) {
+        process.env.AVO_TOKEN = previousToken;
+      }
+    });
+
+    it('flushes, then exits, without running the command', async () => {
+      const initFn = jest.fn<typeof init>();
+
+      const loaded = loadAvoJsonOrInit({
+        argv: {},
+        skipInit: false,
+        skipPullMaster: false,
+        initFn,
+      });
+
+      await expectExitAfterFlush();
+      await loaded;
+      expect(initFn).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('when avo status finds events missing from the code', () => {
+    useTempCwd();
+
+    it('flushes, then exits', async () => {
+      fs.writeFileSync('Avo.ts', avoTs);
+
+      status('', { sources: [{ id: 'cli', name: 'Cli', path: 'Avo.ts' }] }, {});
+
+      await expectExitAfterFlush();
+      expect(logSpy).toHaveBeenCalledWith(
+        expect.stringContaining('error'),
+        expect.stringMatching(/missing events?$/),
+      );
+    });
+  });
+
+  describe('on an unhandled rejection', () => {
+    it('reports the error, flushes, then exits', async () => {
+      const exited = exitOnUnhandledRejection(new Error('boom'));
+
+      await expectExitAfterFlush();
+      await exited;
+      expect(logSpy).toHaveBeenCalledWith(
+        expect.stringContaining('error'),
+        'boom',
+      );
     });
   });
 });
