@@ -3884,10 +3884,10 @@ neo-async@^2.6.2:
   resolved "https://registry.yarnpkg.com/neo-async/-/neo-async-2.6.2.tgz#b4aafb93e3aeb2d8174ca53cf163ab7d7308305f"
   integrity sha512-Yd3UES5mWCSqR+qNT93S3UoYUkqAZ9lLg8a7g9rimsWmYGK8cVToA4/sF3RrshdyV3sAGMXVUmpMYOw+dLpOuw==
 
-node-avo-inspector@^1.2.0:
-  version "1.2.0"
-  resolved "https://registry.yarnpkg.com/node-avo-inspector/-/node-avo-inspector-1.2.0.tgz#4b65e3fd2617b45f75d7adc4b733076370d97953"
-  integrity sha512-9+paV0wWZTNHY3663FHEigmnt5CHC/mLjp2UX1Ep4AzI7vED5y9bUzjUP4zR8b/a2V8g0BF6BQqT9oshTV0/wQ==
+node-avo-inspector@2.0.0-beta.2:
+  version "2.0.0-beta.2"
+  resolved "https://registry.yarnpkg.com/node-avo-inspector/-/node-avo-inspector-2.0.0-beta.2.tgz#74865400ac4652ddec3212dce826b2f1d9a8b5dc"
+  integrity sha512-9AFdaIK0jGGdgN7EkWP3nCq2BwR2kP0FZ4BJoyGmaUgnMhO05Rz8d/ohZpVsC0Wt+DrwEVhUUkift+hQXB2gnw==
   dependencies:
     safe-regex2 "^5.0.0"
 
