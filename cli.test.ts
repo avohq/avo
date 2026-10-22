@@ -10,6 +10,7 @@ import {
   jest,
 } from '@jest/globals';
 import os from 'os';
+import logSymbols from 'log-symbols';
 import {
   getEventsDirectoryPath,
   isFilePerEventMode,
@@ -40,7 +41,9 @@ import {
   buildSourcePaths,
   resolveInspectorEnv,
   status,
+  statusCommand,
 } from './cli.js';
+import Avo from './Avo.js';
 import { commitAll, git, useIsolatedGit } from './testGit.js';
 
 // Each of these suites runs codegen against the real filesystem, so they need an
@@ -2113,6 +2116,67 @@ describe('status', () => {
     });
   });
 
+  // git still lists the rest of the project folder, so the run isn't sent to
+  // the walker, but a nested repo's files never disappear silently.
+  describe('nested repos git cannot list', () => {
+    // A submodule whose gitdir is gone: git fails in its folder.
+    const addBrokenSubmodule = (submodulePath: string): void => {
+      const source = path.join(tempRoot(), path.basename(submodulePath));
+      fs.mkdirSync(source);
+      git(source, 'init', '-q');
+      writeFile(path.join(source, 'lib.ts'), 'Avo.eventOne();\n');
+      commitAll(source);
+      git(
+        '.',
+        '-c',
+        'protocol.file.allow=always',
+        'submodule',
+        'add',
+        '-q',
+        source,
+        submodulePath,
+      );
+      fs.rmSync(path.join('.git', 'modules', submodulePath), {
+        recursive: true,
+        force: true,
+      });
+    };
+
+    it('warns once, with a count, and leaves the exit code alone', async () => {
+      writeAvoFile('Avo.ts', ['eventOne']);
+      writeFile('src/a.ts', 'Avo.eventOne();\n');
+      addBrokenSubmodule('vendor/broken');
+
+      await status(undefined, statusJson([webSource]), { verbose: false });
+
+      expect(output()).toEqual([
+        'warn Skipped 1 nested repo that git could not list; run with --verbose to list it.',
+        'sources\n' +
+          '└─ Web (Avo.ts)\n' +
+          '   └─ eventOne\n' +
+          '      └─ used in src/a.ts: 1 time\n',
+        'info 1 events seen in code',
+      ]);
+      expect(exitSpy).not.toHaveBeenCalled();
+    });
+
+    it("lists each one with git's reason under --verbose", async () => {
+      writeAvoFile('Avo.ts', ['eventOne']);
+      writeFile('src/a.ts', 'Avo.eventOne();\n');
+      addBrokenSubmodule('vendor/first');
+      addBrokenSubmodule('vendor/second');
+
+      await status(undefined, statusJson([webSource]), { verbose: true });
+
+      // What git says after "not a git repository" varies by version.
+      expect(output().filter((line) => line.startsWith('warn'))).toEqual([
+        expect.stringMatching(
+          /^warn Skipped 2 nested repos that git could not list:\nvendor\/first \(not a git repository.*\)\nvendor\/second \(not a git repository.*\)$/,
+        ),
+      ]);
+    });
+  });
+
   // When git can't list, the walker lists the files instead, as it always did,
   // and status says why. Everything after listing works the same.
   describe('falling back to the walker', () => {
@@ -2123,7 +2187,7 @@ describe('status', () => {
           fs.rmSync('.git', { recursive: true, force: true });
         },
         warning:
-          'warn Listed 4 files without git because fatal: not a git repository (or any of the parent directories): .git.',
+          'warn Listed 4 files without git because not a git repository (or any of the parent directories): .git.',
       },
       {
         cause: 'when git is not installed',
@@ -2164,7 +2228,34 @@ describe('status', () => {
       await status(undefined, statusJson([webSource]), { verbose: false });
 
       expect(output().filter((line) => line.startsWith('warn'))).toEqual([
-        'warn Listed 1 file without git because fatal: not a git repository (or any of the parent directories): .git.',
+        'warn Listed 1 file without git because not a git repository (or any of the parent directories): .git.',
+      ]);
+    });
+
+    // git's whole error can say more than its first line, such as how to mark
+    // a folder with dubious ownership as safe.
+    it("adds git's whole error under --verbose", async () => {
+      writeAvoFile('Avo.ts', ['eventOne']);
+      fs.rmSync('.git', { recursive: true, force: true });
+
+      await status(undefined, statusJson([webSource]), { verbose: true });
+
+      expect(output().filter((line) => line.startsWith('warn'))).toEqual([
+        'warn Listed 1 file without git because not a git repository (or any of the parent directories): .git. git said:\n' +
+          'fatal: not a git repository (or any of the parent directories): .git',
+      ]);
+    });
+
+    it('gives only the reason under --verbose when git did not run', async () => {
+      writeAvoFile('Avo.ts', ['eventOne']);
+      const emptyBin = path.join(tempRoot(), 'empty-bin');
+      fs.mkdirSync(emptyBin);
+      process.env.PATH = emptyBin;
+
+      await status(undefined, statusJson([webSource]), { verbose: true });
+
+      expect(output().filter((line) => line.startsWith('warn'))).toEqual([
+        'warn Listed 1 file without git because git was not found.',
       ]);
     });
   });
@@ -2184,7 +2275,7 @@ describe('status', () => {
           '   ├─ eventOne\n' +
           '   │  └─ used in src/a.ts: 1 time\n' +
           '   └─ eventTwo\n' +
-          '      └─ ✖ no usage found\n',
+          `      └─ ${logSymbols.error} no usage found\n`,
         'info 1 of 2 events seen in code',
         'error 1 missing event',
         'missingEvents\n└─ Web (Avo.ts)\n   └─ eventTwo: no usage found\n',
@@ -2209,7 +2300,7 @@ describe('status', () => {
           fs.rmSync('.git', { recursive: true, force: true });
         },
         warnings: [
-          'warn Listed 4 files without git because fatal: not a git repository (or any of the parent directories): .git.',
+          'warn Listed 4 files without git because not a git repository (or any of the parent directories): .git.',
           'warn Skipped 1 file over the 10 MiB size cap; run with --verbose to list it.',
         ],
       },
@@ -2336,12 +2427,40 @@ describe('status', () => {
       );
     });
 
+    // git still lists a tracked file once its folder is replaced by a symlink,
+    // but lstat only sees the file itself. 3.7.0's walker never followed
+    // symlinks, so nothing outside the project folder is read.
+    it('skips a file whose folder is a symlink to outside the project folder', async () => {
+      writeAvoFile('Avo.ts', ['eventOne', 'eventTwo']);
+      writeFile('src/a.ts', 'Avo.eventOne();\n');
+      writeFile('lib/calls.ts', 'Avo.eventTwo();\n');
+      commitAll('.');
+      // A sibling whose path starts with the project folder's.
+      const outside = path.join(tempRoot(), 'project-outside');
+      writeFile(path.join(outside, 'calls.ts'), 'Avo.eventTwo();\n');
+      fs.rmSync('lib', { recursive: true, force: true });
+      fs.symlinkSync(outside, 'lib');
+      const readFileSpy = jest.spyOn(fs, 'readFile');
+
+      await status(undefined, statusJson([webSource]), { verbose: false });
+
+      expect(readPaths(readFileSpy)).not.toContain('lib/calls.ts');
+      expect(output()).toContain(
+        'sources\n' +
+          '└─ Web (Avo.ts)\n' +
+          '   ├─ eventOne\n' +
+          '   │  └─ used in src/a.ts: 1 time\n' +
+          '   └─ eventTwo\n' +
+          `      └─ ${logSymbols.error} no usage found\n`,
+      );
+      expect(exitSpy.mock.calls).toEqual([[1]]);
+    });
+
     it('tolerates a listed file deleted from disk, or one it cannot read', async () => {
       writeAvoFile('Avo.ts', ['eventOne']);
       writeFile('src/a.ts', 'Avo.eventOne();\n');
       writeFile('src/deleted.ts', 'Avo.eventOne();\n');
       writeFile('src/unreadable.ts', 'Avo.eventOne();\n');
-      fs.chmodSync('src/unreadable.ts', 0o000);
       // Deleted after listing, as a file missing from a sparse checkout or
       // removed mid-run would be.
       const realLstat = fs.lstat;
@@ -2353,6 +2472,24 @@ describe('status', () => {
           fs.unlinkSync(filePath);
         }
         realLstat(filePath, callback);
+      }) as any);
+      // Unreadable through the spy rather than chmod 000, which root can
+      // still read.
+      const realReadFile = fs.readFile;
+      jest.spyOn(fs, 'readFile').mockImplementation(((
+        filePath: string,
+        encoding: string,
+        callback: (error: unknown, data?: unknown) => void,
+      ) => {
+        if (filePath === 'src/unreadable.ts') {
+          callback(
+            Object.assign(new Error('EACCES: permission denied'), {
+              code: 'EACCES',
+            }),
+          );
+          return;
+        }
+        realReadFile(filePath, encoding as any, callback);
       }) as any);
 
       await status(undefined, statusJson([webSource]), { verbose: true });
@@ -2399,6 +2536,55 @@ describe('status', () => {
           '      └─ used in src/a.ts: 1 time\n',
       );
       expect(exitSpy).not.toHaveBeenCalled();
+    });
+  });
+
+  // The `status [source]` command counts each run once in the CLI's analytics.
+  describe('the status command', () => {
+    let cliInvokedSpy: any;
+
+    beforeEach(() => {
+      cliInvokedSpy = jest
+        .spyOn(Avo, 'cliInvoked')
+        .mockImplementation(() => undefined);
+    });
+
+    it('sends one cliInvoked event when status fails', async () => {
+      writeFile('avo.json', JSON.stringify(statusJson([webSource])));
+      writeFile('Avo.ts', '// AVOEVENTMAP:[notJson]\n');
+
+      await expect(statusCommand({ verbose: false })).rejects.toThrow(
+        SyntaxError,
+      );
+
+      expect(cliInvokedSpy.mock.calls).toEqual([
+        [
+          expect.objectContaining({
+            schemaId: 'schema-1',
+            cliAction: Avo.CliAction.STATUS,
+          }),
+        ],
+      ]);
+    });
+
+    it('sends one cliInvoked event, without the workspace, when avo.json fails to load', async () => {
+      writeFile(
+        'avo.json',
+        JSON.stringify({ ...statusJson([webSource]), avo: { version: 99 } }),
+      );
+
+      await expect(statusCommand({ verbose: false })).rejects.toThrow(
+        'Your avo CLI is outdated, please update',
+      );
+
+      expect(cliInvokedSpy.mock.calls).toEqual([
+        [
+          expect.objectContaining({
+            schemaId: 'N/A',
+            cliAction: Avo.CliAction.STATUS,
+          }),
+        ],
+      ]);
     });
   });
 });

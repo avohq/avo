@@ -11,8 +11,12 @@ _Avoid_: workspace (that is an Avo workspace), root (clashes with the git root)
 ### Implementation status
 
 **Listed file**:
-A path under the project folder, submodules included, that `avo status` considers at all, once ignore rules have been applied.
+A path under the project folder, nested repos included, that `avo status` considers at all, once ignore rules have been applied.
 _Avoid_: scanned file, walked file
+
+**Nested repo**:
+A git repo inside the project folder, a submodule or not, whose files `avo status` lists by that repo's own ignore rules.
+_Avoid_: submodule (when one that isn't a submodule is meant too)
 
 **Analysed file**:
 A listed file that matches a source's effective glob, is within the size cap, and is read to find where events are called.

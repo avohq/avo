@@ -6,15 +6,19 @@
 // about 3 GB) in a new folder under os.tmpdir(), runs `avo status` there with
 // each build on each Node binary, prints a markdown table, and deletes the
 // repo in `finally`, also after a run that ran out of memory. It needs macOS
-// (for `/usr/bin/time -l`), git, and about 3.5 GB of free disk.
+// (for `/usr/bin/time -l`), git, and about 3.5 GB of free disk, which it checks
+// before it starts only when run on Node 18.15 or later (fs.statfsSync).
 //
 //   yarn build
 //   node scripts/large-repo-check.js \
-//     --node ~/.nvm/versions/node/v14.18.1/bin/node \
-//     --node "$(command -v node)" \
+//     --node "$(nvm which 14)" \
+//     --node "$(nvm which 24)" \
 //     --candidate ./cli.js \
 //     --baseline "$(npm root -g)/avo/cli.js" \
 //     --out large-repo-results.md
+//
+// The release PR expects both --node values: a Node 14.x and a Node 24.x
+// binary.
 //
 // Options:
 //   --shape gated|reporter  gated (default) is the release gate. reporter is
@@ -31,14 +35,17 @@
 //   --out <file>            also write the markdown to this file
 //
 // The gate (gated shape only, at the default --heap and --scale; exit 1 if it
-// fails): every candidate run exits 0, finds every event and prints the
-// oversized-file warning, and every baseline run runs out of memory. Wall time
-// and peak RSS are recorded, not gated.
+// fails): every candidate run exits 0, finds all 20 of the repo's events and
+// prints the oversized-file warning, and every baseline run runs out of
+// memory. Wall time and peak RSS are recorded, not gated.
 //
 // Each run is `/usr/bin/time -l <node> --max-old-space-size=<heap> <cli.js>
 // status` (macOS: time reports peak RSS in bytes), with FORCE_COLOR=0,
-// NO_UPDATE_NOTIFIER=1, and AVO_API_ORIGIN pointed at a closed local port so
-// the runs don't send the CLI's usage events to Avo.
+// NO_UPDATE_NOTIFIER=1, and AVO_API_ORIGIN pointed at a closed local port, so
+// the CLI's own analytics destination sends nothing. Each run still sends its
+// cliInvoked event's schema (no property values, in prod) to Avo Inspector:
+// the Inspector client always posts to api.avo.app, and the CLI has no setting
+// that stops it.
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
@@ -80,6 +87,11 @@ const ofCap = (sizeCap, percent) => Math.floor((sizeCap * percent) / 100);
 // Enough files just under the cap to keep every concurrent read near the cap.
 const NEAR_CAP_FILE_COUNT = 32;
 const NEAR_CAP_PERCENT = 99;
+
+// Opens each near-cap file. `…` is outside Latin-1, so V8 holds the file read
+// as a two-byte string, the worst case the memory budget allows for; ASCII
+// filler alone would fill only half of it.
+const NEAR_CAP_HEAD = '// Generated catalog…\n';
 
 // Over the cap. Each calls an event that is also called from a file under the
 // cap, so no event's only usage is in an oversized file.
@@ -278,7 +290,9 @@ export function generateRepo(
         'generated',
         `catalog-${pad(index, 2)}.ts`,
       ),
-      `import Avo from '../../Avo';\n\nAvo.${events[index % events.length]}({});\n`,
+      `${NEAR_CAP_HEAD}import Avo from '../../Avo';\n\nAvo.${
+        events[index % events.length]
+      }({});\n`,
       ofCap(sizeCap, NEAR_CAP_PERCENT),
       nearCapFiller,
     );
@@ -405,11 +419,13 @@ export function gateFailures(runs, { heap, scale }) {
     }
     return [
       ...(run.exitCode === 0 ? [] : [`${who} exited ${run.exitCode}, not 0`]),
-      ...(run.eventsTotal !== null &&
-      run.eventsTotal > 0 &&
-      run.eventsSeen === run.eventsTotal
+      // Against the repo's own count, so a build that read only part of the
+      // event map can't pass.
+      ...(run.eventsSeen === EVENT_COUNT && run.eventsTotal === EVENT_COUNT
         ? []
-        : [`${who} found ${run.eventsSeen} of ${run.eventsTotal} events`]),
+        : [
+            `${who} found ${run.eventsSeen} of ${run.eventsTotal} events, not ${EVENT_COUNT} of ${EVENT_COUNT}`,
+          ]),
       ...(run.warnings.some((warning) =>
         warning.includes(`over the ${SIZE_CAP_BYTES / MIB} MiB size cap`),
       )
@@ -494,20 +510,25 @@ const commandOutput = (command, args, cwd) => {
   }
 };
 
-// Which avo a cli.js is, from the package.json next to it, plus the commit
-// when it sits at the top of a git checkout (a global install can sit inside
-// someone else's checkout, such as nvm's).
-const describeBuild = (cli) => {
-  const dir = path.dirname(cli);
-  let version = 'unknown version';
+// Which avo a cli.js is, from the package.json next to it. Shown on every run,
+// as the gate trusts --baseline to be the current release.
+const buildVersion = (cli) => {
   try {
-    version = `avo ${
-      JSON.parse(fs.readFileSync(path.join(dir, 'package.json'), 'utf8'))
-        .version
+    return `avo ${
+      JSON.parse(
+        fs.readFileSync(path.join(path.dirname(cli), 'package.json'), 'utf8'),
+      ).version
     }`;
   } catch (error) {
-    // Described without a version.
+    return 'unknown version';
   }
+};
+
+// The build's version, plus the commit when it sits at the top of a git
+// checkout (a global install can sit inside someone else's checkout, such as
+// nvm's).
+const describeBuild = (cli, version) => {
+  const dir = path.dirname(cli);
   const topLevel = commandOutput('git', ['rev-parse', '--show-toplevel'], dir);
   if (topLevel === null || fs.realpathSync(topLevel) !== fs.realpathSync(dir)) {
     return `\`${cli}\` (${version})`;
@@ -649,7 +670,7 @@ const formatMarkdown = ({ options, repo, generationSeconds, builds, runs }) => {
     ...runs.map((run) =>
       [
         '',
-        run.build,
+        `${run.build} (${run.buildVersion})`,
         run.nodeVersion,
         outcomeOf(run, options.timeoutMinutes),
         run.eventsTotal === null
@@ -693,7 +714,14 @@ async function main(args) {
     ...(options.baseline === null
       ? []
       : [{ name: 'baseline', cli: options.baseline }]),
-  ].map((build) => ({ ...build, description: describeBuild(build.cli) }));
+  ].map((build) => {
+    const version = buildVersion(build.cli);
+    return {
+      ...build,
+      version,
+      description: describeBuild(build.cli, version),
+    };
+  });
   const nodes = options.nodes.map((node) => ({
     node,
     nodeVersion: execFileSync(node, ['--version'], { encoding: 'utf8' }).trim(),
@@ -739,7 +767,7 @@ async function main(args) {
     for (const { node, nodeVersion } of nodes) {
       // eslint-disable-next-line no-restricted-syntax
       for (const build of builds) {
-        log(`Running ${build.name} on Node ${nodeVersion}`);
+        log(`Running ${build.name} (${build.version}) on Node ${nodeVersion}`);
         // eslint-disable-next-line no-await-in-loop
         const result = await runStatus({
           node,
@@ -750,6 +778,7 @@ async function main(args) {
         });
         const run = {
           build: build.name,
+          buildVersion: build.version,
           nodeVersion,
           ...summariseRun(result),
           timedOut: result.timedOut,

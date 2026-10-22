@@ -32,6 +32,7 @@ import fuzzypath from 'inquirer-fuzzy-path';
 import * as report from './reporter.js';
 import Avo from './Avo.js';
 import { listFiles } from './listing.js';
+import type { Listing, UnlistedRepo } from './listing.js';
 
 declare global {
   namespace NodeJS {
@@ -2267,6 +2268,33 @@ function buildTrackedButIgnoredWarning(
   );
 }
 
+function buildUnlistedRepoWarning(
+  unlistedRepos: UnlistedRepo[],
+  verbose: boolean,
+): string {
+  const count = unlistedRepos.length;
+  return buildCountedWarning(
+    `Skipped ${count} nested ${
+      count === 1 ? 'repo' : 'repos'
+    } that git could not list`,
+    unlistedRepos.map(
+      ({ path: repoPath, reason }) => `${repoPath} (${reason})`,
+    ),
+    verbose,
+  );
+}
+
+// git's whole error only under --verbose: the reason is its first line.
+function buildFallbackWarning(listing: Listing, verbose: boolean): string {
+  const count = listing.listedFiles.length;
+  const summary = `Listed ${count} ${
+    count === 1 ? 'file' : 'files'
+  } without git because ${listing.fallbackReason}.`;
+  return verbose && listing.fallbackDetails !== null
+    ? `${summary} git said:\n${listing.fallbackDetails}`
+    : summary;
+}
+
 // Resolves with the results in item order, whatever order the tasks finish in.
 function mapWithConcurrency<T, R>(
   items: T[],
@@ -2379,22 +2407,36 @@ type StatusSourceResults = {
 };
 
 // What became of a listed file that matched some source's effective glob. A
-// symlink, or a file that couldn't be checked or read, has none (null).
+// symlink, a file outside the project folder, or a file that couldn't be
+// checked or read, has none (null).
 type StatusFileOutcome =
   | ({ kind: 'oversized' } & OversizedFile)
   | {
       kind: 'analysed';
       filePath: string;
-      // Per matching source index, the number of lines using each of its
-      // events, in event map order.
-      usageCounts: Map<number, number[]>;
+      // Per matching source index, [event map index, number of lines using
+      // the event] for each event the file uses. Kept until the run ends for
+      // every analysed file, so events it doesn't use take no room.
+      usageCounts: Map<number, [number, number][]>;
     };
 
-// lstat first, so an oversized file is never read.
+function isInsideFolder(folder: string, filePath: string): boolean {
+  const relative = path.relative(folder, filePath);
+  return (
+    relative !== '' &&
+    relative !== '..' &&
+    !relative.startsWith(`..${path.sep}`) &&
+    !path.isAbsolute(relative)
+  );
+}
+
+// lstat first, so an oversized file is never read. `projectFolder` is a real
+// path.
 function analyseFile(
   filePath: string,
   sourceIndexes: number[],
   analyses: SourceAnalysis[],
+  projectFolder: string,
   verbose: boolean,
 ): Promise<StatusFileOutcome | null> {
   return pify(fs.lstat)(filePath)
@@ -2402,29 +2444,40 @@ function analyseFile(
       if (stats.isSymbolicLink()) {
         return null;
       }
-      if (stats.size > SIZE_CAP_BYTES) {
-        return { kind: 'oversized', filePath, size: stats.size };
-      }
-      return pify(fs.readFile)(filePath, 'utf8')
-        .then((data: string) => ({
-          kind: 'analysed',
-          filePath,
-          // The contents are dropped as soon as they are matched.
-          usageCounts: new Map(
-            sourceIndexes.map((sourceIndex) => [
-              sourceIndex,
-              analyses[sourceIndex].eventPatterns.map(
-                (re) => findMatches(data, re).length,
-              ),
-            ]),
-          ),
-        }))
-        .catch(() => {
-          if (verbose) {
-            report.warn(`Failed to parse file: ${filePath}`);
-          }
+      // git still lists a tracked path once a folder above it is replaced by
+      // a symlink, which lstat doesn't see. Like a symlink, a file whose real
+      // path is outside the project folder is skipped.
+      return pify(fs.realpath.native)(filePath).then((realPath: string) => {
+        if (!isInsideFolder(projectFolder, realPath)) {
           return null;
-        });
+        }
+        if (stats.size > SIZE_CAP_BYTES) {
+          return { kind: 'oversized', filePath, size: stats.size };
+        }
+        return pify(fs.readFile)(filePath, 'utf8')
+          .then((data: string) => ({
+            kind: 'analysed',
+            filePath,
+            // The contents are dropped as soon as they are matched.
+            usageCounts: new Map(
+              sourceIndexes.map((sourceIndex) => [
+                sourceIndex,
+                analyses[sourceIndex].eventPatterns.flatMap(
+                  (re, eventIndex) => {
+                    const count = findMatches(data, re).length;
+                    return count > 0 ? [[eventIndex, count]] : [];
+                  },
+                ),
+              ]),
+            ),
+          }))
+          .catch(() => {
+            if (verbose) {
+              report.warn(`Failed to parse file: ${filePath}`);
+            }
+            return null;
+          });
+      });
     })
     .catch(() => {
       if (verbose) {
@@ -2441,8 +2494,8 @@ export function status(source: string, json, argv: any): Promise<void> {
 
   sources = sources.filter(({ analysis }) => analysis !== false);
 
-  return listFiles()
-    .then((listing) =>
+  return Promise.all([listFiles(), pify(fs.realpath.native)('.')])
+    .then(([listing, projectFolder]: [Listing, string]) =>
       Promise.all(
         sources.map((source) =>
           pify(fs.readFile)(source.path, 'utf8').then((data: string) =>
@@ -2476,7 +2529,13 @@ export function status(source: string, json, argv: any): Promise<void> {
           matchedFiles,
           STATUS_READ_CONCURRENCY,
           ({ filePath, sourceIndexes }) =>
-            analyseFile(filePath, sourceIndexes, analyses, argv.verbose),
+            analyseFile(
+              filePath,
+              sourceIndexes,
+              analyses,
+              projectFolder,
+              argv.verbose,
+            ),
         ).then((outcomes) => ({
           listing,
           analyses,
@@ -2514,17 +2573,18 @@ export function status(source: string, json, argv: any): Promise<void> {
             );
           }
 
+          const usages: EventUsage[][] = analysis.eventMap.map(() => []);
+          analysedFiles.forEach(({ filePath, usageCounts }) => {
+            usageCounts.get(sourceIndex).forEach(([eventIndex, count]) => {
+              usages[eventIndex].push({ filePath, count });
+            });
+          });
           return {
             ...source,
             results: Object.fromEntries(
               analysis.eventMap.map((eventName, eventIndex) => [
                 eventName,
-                analysedFiles
-                  .map(({ filePath, usageCounts }) => ({
-                    filePath,
-                    count: usageCounts.get(sourceIndex)[eventIndex],
-                  }))
-                  .filter(({ count }) => count > 0),
+                usages[eventIndex],
               ]),
             ),
           };
@@ -2533,11 +2593,11 @@ export function status(source: string, json, argv: any): Promise<void> {
 
       // Each warning prints at most once per run, and none changes the exit code.
       if (listing.fallbackReason !== null) {
-        const count = listing.listedFiles.length;
+        report.warn(buildFallbackWarning(listing, argv.verbose));
+      }
+      if (listing.unlistedRepos.length > 0) {
         report.warn(
-          `Listed ${count} ${count === 1 ? 'file' : 'files'} without git because ${
-            listing.fallbackReason
-          }.`,
+          buildUnlistedRepoWarning(listing.unlistedRepos, argv.verbose),
         );
       }
       if (matchingTrackedButIgnored.length > 0) {
@@ -2639,6 +2699,43 @@ export function status(source: string, json, argv: any): Promise<void> {
         throw error;
       }
     });
+}
+
+// The `status [source]` command. Its cliInvoked event goes out once per run:
+// without the workspace when avo.json can't be loaded, and not again when
+// status() itself fails.
+export function statusCommand(argv): Promise<void> {
+  return loadAvoJsonOrInit({ argv, skipInit: false, skipPullMaster: false })
+    .then((json) => {
+      Avo.cliInvoked({
+        schemaId: json.schema.id,
+        schemaName: json.schema.name,
+        branchId: json.branch.id,
+        branchName: json.branch.name,
+        userId_: installIdOrUserId(),
+        cliAction: Avo.CliAction.STATUS,
+        cliInvokedByCi: invokedByCi(),
+        force: undefined,
+        forceFeatures: undefined,
+      });
+      report.info(`Currently on branch '${json.branch.name}'`);
+      return getSource(argv, json);
+    })
+    .catch((error) => {
+      Avo.cliInvoked({
+        schemaId: 'N/A',
+        schemaName: 'N/A',
+        branchId: 'N/A',
+        branchName: 'N/A',
+        userId_: installIdOrUserId(),
+        cliAction: Avo.CliAction.STATUS,
+        cliInvokedByCi: invokedByCi(),
+        force: undefined,
+        forceFeatures: undefined,
+      });
+      throw error;
+    })
+    .then(([source, json]) => status(source, json, argv));
 }
 
 /// //////////////////////////////////////////////////////////////////////
@@ -3312,37 +3409,7 @@ if (isMainModule) {
         command: 'status [source]',
         describe: 'Show the status of the Avo implementation',
         handler: (argv) => {
-          loadAvoJsonOrInit({ argv, skipInit: false, skipPullMaster: false })
-            .then((json) => {
-              Avo.cliInvoked({
-                schemaId: json.schema.id,
-                schemaName: json.schema.name,
-                branchId: json.branch.id,
-                branchName: json.branch.name,
-                userId_: installIdOrUserId(),
-                cliAction: Avo.CliAction.STATUS,
-                cliInvokedByCi: invokedByCi(),
-                force: undefined,
-                forceFeatures: undefined,
-              });
-              report.info(`Currently on branch '${json.branch.name}'`);
-              return getSource(argv, json);
-            })
-            .then(([source, json]) => status(source, json, argv))
-            .catch((error) => {
-              Avo.cliInvoked({
-                schemaId: 'N/A',
-                schemaName: 'N/A',
-                branchId: 'N/A',
-                branchName: 'N/A',
-                userId_: installIdOrUserId(),
-                cliAction: Avo.CliAction.STATUS,
-                cliInvokedByCi: invokedByCi(),
-                force: undefined,
-                forceFeatures: undefined,
-              });
-              throw error;
-            });
+          statusCommand(argv);
         },
       })
       .command({

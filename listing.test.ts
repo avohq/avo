@@ -372,18 +372,101 @@ describe('listFiles', () => {
         expect(listing.listedFiles).toEqual(['lib/inside.ts', 'src/a.ts']);
       });
 
-      // git shows a repo inside the project folder that isn't a submodule as
-      // one untracked folder, `nested/`, and lists nothing inside it.
-      it('lists nothing for a nested repo that is not a submodule', async () => {
+      it('never lists a submodule that the repo ignores', async () => {
+        const lib = initSubmoduleSource('lib', 'lib.ts');
         const repo = initRepo('repo');
         touch(repo, 'src/a.ts');
-        initRepo(path.join('repo', 'nested'));
-        touch(repo, 'nested/n.ts');
+        gitAllowingFileSubmodules(repo, 'submodule', 'add', '-q', lib, 'lib');
+        commitAll(repo);
+        write(path.join(repo, '.gitignore'), 'lib/\n');
         process.chdir(repo);
 
         const listing = await listFiles();
 
-        expect(listing.listedFiles).toEqual(['src/a.ts']);
+        expect(listing.listedFiles).toEqual([
+          '.gitignore',
+          '.gitmodules',
+          'src/a.ts',
+        ]);
+        expect(listing.trackedButIgnored).toEqual(['lib']);
+      });
+
+      // `git add <folder>` on a folder holding a repo commits a gitlink with
+      // no .gitmodules entry, which `git submodule` fails on.
+      it('lists a nested repo committed without a .gitmodules entry', async () => {
+        const repo = initRepo('repo');
+        touch(repo, 'src/a.ts');
+        const embedded = initRepo(path.join('repo', 'embedded'));
+        touch(embedded, 'src/e.ts');
+        commitAll(embedded);
+        commitAll(repo);
+        process.chdir(repo);
+
+        const listing = await listFiles();
+
+        expect(listing.listedFiles).toEqual(['embedded/src/e.ts', 'src/a.ts']);
+        expect(listing.fallbackReason).toBeNull();
+      });
+
+      it('skips a submodule git cannot list and says why, still listing the rest with git', async () => {
+        const broken = initSubmoduleSource('broken', 'broken.ts');
+        const lib = initSubmoduleSource('lib', 'lib.ts');
+        const repo = initRepo('repo');
+        touch(repo, 'src/a.ts');
+        gitAllowingFileSubmodules(
+          repo,
+          'submodule',
+          'add',
+          '-q',
+          broken,
+          'broken',
+        );
+        gitAllowingFileSubmodules(repo, 'submodule', 'add', '-q', lib, 'lib');
+        commitAll(repo);
+        fs.rmSync(path.join(repo, '.git', 'modules', 'broken'), {
+          recursive: true,
+          force: true,
+        });
+        process.chdir(repo);
+
+        const listing = await listFiles();
+
+        expect(listing.listedFiles).toEqual([
+          '.gitmodules',
+          'lib/lib.ts',
+          'src/a.ts',
+        ]);
+        expect(listing.fallbackReason).toBeNull();
+        // What git says after "not a git repository" varies by version.
+        expect(listing.unlistedRepos).toEqual([
+          {
+            path: 'broken',
+            reason: expect.stringMatching(/^not a git repository/),
+          },
+        ]);
+      });
+
+      // git shows a repo inside the project folder that isn't a submodule as
+      // one untracked folder, `nested/`; 3.7.0's walker listed its files.
+      it('lists a nested repo that is not a submodule by its own rules, prefixed with its path', async () => {
+        const repo = initRepo('repo');
+        touch(repo, 'src/a.ts');
+        const nested = initRepo(path.join('repo', 'nested'));
+        write(path.join(nested, '.gitignore'), '*.log\n');
+        touch(nested, 'src/n.ts');
+        commitAll(nested);
+        touch(nested, 'untracked.ts', 'debug.log');
+        process.chdir(repo);
+
+        const listing = await listFiles();
+
+        expect(listing.listedFiles).toEqual([
+          'nested/.gitignore',
+          'nested/src/n.ts',
+          'nested/untracked.ts',
+          'src/a.ts',
+        ]);
+        expect(listing.unlistedRepos).toEqual([]);
       });
     });
   });
@@ -407,7 +490,10 @@ describe('listFiles', () => {
       expect(listing).toEqual({
         listedFiles: ['src/a.ts'],
         trackedButIgnored: [],
+        unlistedRepos: [],
         fallbackReason:
+          'not a git repository (or any of the parent directories): .git',
+        fallbackDetails:
           'fatal: not a git repository (or any of the parent directories): .git',
       });
     });
@@ -426,7 +512,9 @@ describe('listFiles', () => {
       expect(listing).toEqual({
         listedFiles: ['src/a.ts'],
         trackedButIgnored: [],
+        unlistedRepos: [],
         fallbackReason: 'git was not found',
+        fallbackDetails: null,
       });
     });
 
@@ -441,7 +529,31 @@ describe('listFiles', () => {
       expect(listing).toEqual({
         listedFiles: ['src/a.ts'],
         trackedButIgnored: [],
+        unlistedRepos: [],
         fallbackReason: 'the project folder is ignored by git',
+        fallbackDetails: null,
+      });
+    });
+
+    // check-ignore skips paths in the index, so a force-added file mustn't
+    // make the ignored folder look tracked, which would list nothing untracked.
+    it('lists with the walker when the project folder is ignored by git but has force-added files', async () => {
+      const repo = initRepo('repo');
+      write(path.join(repo, '.gitignore'), 'app/\n');
+      touchWalkerFixture(path.join(repo, 'app'));
+      git(repo, 'add', '-f', 'app/src/a.ts');
+      commitAll(repo);
+      touch(repo, 'app/src/b.ts');
+      process.chdir(path.join(repo, 'app'));
+
+      const listing = await listFiles();
+
+      expect(listing).toEqual({
+        listedFiles: ['src/a.ts', 'src/b.ts'],
+        trackedButIgnored: [],
+        unlistedRepos: [],
+        fallbackReason: 'the project folder is ignored by git',
+        fallbackDetails: null,
       });
     });
   });

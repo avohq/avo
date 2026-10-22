@@ -1,18 +1,36 @@
 import { spawn } from 'child_process';
+import fs from 'fs';
+import path from 'path';
 import walk from 'ignore-walk';
+
+// `path` is relative to the project folder; `reason` is why git failed.
+export type UnlistedRepo = { path: string; reason: string };
 
 export type Listing = {
   // Paths relative to the project folder, in listing order.
   listedFiles: string[];
   // Tracked files that match an ignore rule. Never part of listedFiles.
   trackedButIgnored: string[];
+  // Nested repos git failed to list, so none of their files are listed.
+  unlistedRepos: UnlistedRepo[];
   // Why git couldn't list and the walker did instead; null when git listed.
   fallbackReason: string | null;
+  // git's whole error output behind fallbackReason, which can say more, such
+  // as how to trust a folder with dubious ownership; null when git didn't run
+  // or didn't fail.
+  fallbackDetails: string | null;
 };
 
 // Thrown when git can't list the project folder; its message is the reason
 // carried by the walker's listing.
-class GitFallback extends Error {}
+class GitFallback extends Error {
+  constructor(
+    message: string,
+    readonly details: string | null = null,
+  ) {
+    super(message);
+  }
+}
 
 type GitResult = { code: number; stdout: Buffer; stderr: string };
 
@@ -48,31 +66,34 @@ function runGit(args: string[], cwd = '.'): Promise<GitResult> {
 }
 
 // git's first line of stderr says why it failed, e.g. "fatal: not a git
-// repository (or any of the parent directories): .git".
+// repository (or any of the parent directories): .git". The reason leaves out
+// "fatal: ", which reads oddly after "because".
 function gitFailure({ code, stderr }: GitResult): GitFallback {
   const firstLine = stderr.split('\n').find((line) => line.trim() !== '');
-  return new GitFallback(firstLine?.trim() ?? `git exited with code ${code}`);
+  const details = stderr.trim();
+  return new GitFallback(
+    firstLine?.trim().replace(/^fatal: /, '') ?? `git exited with code ${code}`,
+    details === '' ? null : details,
+  );
 }
 
 // Listings use `-z` and split on NUL: without `-z`, git quotes non-ASCII paths.
-function gitLines(
-  args: string[],
-  cwd: string,
-  separator: string,
-): Promise<string[]> {
+function gitLines(args: string[], cwd: string): Promise<string[]> {
   return runGit(args, cwd).then((result) => {
     if (result.code !== 0) {
       throw gitFailure(result);
     }
     return result.stdout
       .toString('utf8')
-      .split(separator)
+      .split('\0')
       .filter((line) => line !== '');
   });
 }
 
 function isProjectFolderIgnored(): Promise<boolean> {
-  return runGit(['check-ignore', '-q', '.']).then((result) => {
+  // --no-index: check-ignore otherwise skips paths in the index, so a file
+  // force-added inside an ignored project folder would hide the ignore rule.
+  return runGit(['check-ignore', '--no-index', '-q', '.']).then((result) => {
     // check-ignore exits 0 when the path is ignored and 1 when it isn't.
     if (result.code === 0 || result.code === 1) {
       return result.code === 0;
@@ -122,118 +143,97 @@ export function splitRepoEntries(
   };
 }
 
-type RepoListing = {
-  paths: string[];
-  trackedButIgnored: string[];
-  hasSubmodules: boolean;
-};
+// One repo's share of the listing, its paths prefixed with the repo's path.
+type RepoListing = Pick<
+  Listing,
+  'listedFiles' | 'trackedButIgnored' | 'unlistedRepos'
+>;
 
-// Lists one repo, the project folder's or a submodule. --stage gives each
-// tracked file's mode, so submodule entries can be dropped. Tracked files that
-// match an ignore rule come back separately, for the caller to remove.
-function listRepo(cwd: string, prefix: string): Promise<RepoListing> {
+// Lists one repo, the project folder's or a nested one, followed by every
+// nested repo inside it, by the same rules. ls-files run in a subfolder only
+// shows paths below it, so a nested repo outside the project folder is never
+// listed. Nested repos are listed one at a time, so a repo with many doesn't
+// spawn git for all of them at once.
+function listRepo(cwd: string, prefix: string): Promise<RepoListing[]> {
   const withPrefix = (filePath: string): string => `${prefix}${filePath}`;
+
+  // A nested repo without a `.git` is an uninitialised submodule: an empty
+  // folder, with nothing to list. One git fails on, such as a submodule whose
+  // gitdir is gone, is left out and said why, rather than sending the whole
+  // listing to the walker.
+  const listNestedRepo = (nestedRepo: string): Promise<RepoListing[]> => {
+    const dir = path.join(cwd, nestedRepo);
+    if (!fs.existsSync(path.join(dir, '.git'))) {
+      return Promise.resolve([]);
+    }
+    return listRepo(dir, `${withPrefix(nestedRepo)}/`).catch((error) => {
+      if (error instanceof GitFallback) {
+        return [
+          {
+            listedFiles: [],
+            trackedButIgnored: [],
+            unlistedRepos: [
+              { path: withPrefix(nestedRepo), reason: error.message },
+            ],
+          },
+        ];
+      }
+      throw error;
+    });
+  };
+
   return Promise.all([
-    gitLines(['ls-files', '-z', '--stage'], cwd, '\0'),
-    gitLines(['ls-files', '-z', '--others', '--exclude-standard'], cwd, '\0'),
+    gitLines(['ls-files', '-z', '--stage'], cwd),
+    gitLines(['ls-files', '-z', '--others', '--exclude-standard'], cwd),
     gitLines(
       ['ls-files', '-z', '--cached', '--ignored', '--exclude-standard'],
       cwd,
-      '\0',
     ),
-  ]).then(([stagedEntries, untracked, trackedButIgnored]) => {
-    // Each entry is "<mode> <object> <stage>\t<path>". Mode 160000 is a
-    // submodule, listed as its own repo, or not at all when uninitialised.
-    const isSubmodule = (entry: string): boolean => entry.startsWith('160000 ');
-    const tracked = stagedEntries
-      .filter((entry) => !isSubmodule(entry))
-      .map((entry) => entry.slice(entry.indexOf('\t') + 1));
-    // A nested repo that isn't a submodule is listed as its folder, `nested/`.
-    const untrackedFiles = untracked.filter(
-      (filePath) => !filePath.endsWith('/'),
+  ]).then(([staged, untracked, ignored]) => {
+    const entries = splitRepoEntries(staged, untracked, ignored);
+    return entries.nestedRepos.reduce(
+      (listings, nestedRepo) =>
+        listings.then((done) =>
+          listNestedRepo(nestedRepo).then((nested) => [...done, ...nested]),
+        ),
+      Promise.resolve<RepoListing[]>([
+        {
+          listedFiles: entries.files.map(withPrefix),
+          trackedButIgnored: entries.trackedButIgnored.map(withPrefix),
+          unlistedRepos: [],
+        },
+      ]),
     );
-    return {
-      paths: [...tracked, ...untrackedFiles].map(withPrefix),
-      trackedButIgnored: trackedButIgnored.map(withPrefix),
-      hasSubmodules: stagedEntries.some(isSubmodule),
-    };
   });
 }
 
-// Paths of the initialised submodules, nested ones included, relative to the
-// project folder. Submodules elsewhere in the repo come back as `../` paths
-// and are dropped: avo status never looks above the project folder.
-// --recurse-submodules isn't used because with --ignored it only checks the
-// main repo, missing a submodule's tracked-but-ignored files.
-function listSubmodules(): Promise<string[]> {
-  return gitLines(
-    [
-      'submodule',
-      'foreach',
-      '--recursive',
-      '--quiet',
-      'printf "%s\\n" "$displaypath"',
-    ],
-    '.',
-    '\n',
-  ).then((submodules) =>
-    submodules.filter((submodule) => !submodule.startsWith('../')),
-  );
-}
-
 function listWithGit(): Promise<Listing> {
-  return listRepo('.', '')
-    .then((projectFolder) =>
-      // `git submodule` is slow to start, so it only runs when the project
-      // folder holds a submodule.
-      (projectFolder.hasSubmodules
-        ? listSubmodules()
-        : Promise.resolve<string[]>([])
-      ).then((submodules) =>
-        // One submodule at a time, so a repo with many doesn't spawn git for
-        // all of them at once.
-        submodules.reduce(
-          (listings, submodule) =>
-            listings.then((done) =>
-              listRepo(submodule, `${submodule}/`).then((listing) => [
-                ...done,
-                listing,
-              ]),
-            ),
-          Promise.resolve([projectFolder]),
-        ),
-      ),
-    )
-    .then((listings) => {
-      // A path in a merge conflict is listed once per stage. git's own
-      // --deduplicate needs git 2.31, so de-duplicate here.
-      const paths = new Set(listings.flatMap((listing) => listing.paths));
-      const ignored = new Set(
-        listings.flatMap((listing) => listing.trackedButIgnored),
-      );
-      // Listing order sorts by UTF-16 code unit, which unlike localeCompare is
-      // the same on every machine, and doesn't depend on which repo a file is
-      // in or whether it is committed yet.
-      return {
-        listedFiles: [...paths]
-          .filter((filePath) => !ignored.has(filePath))
-          .sort(),
-        trackedButIgnored: [...ignored].sort(),
-        fallbackReason: null,
-      };
-    });
+  return listRepo('.', '').then((listings) => ({
+    // Listing order sorts by UTF-16 code unit, which unlike localeCompare is
+    // the same on every machine, and doesn't depend on which repo a file is
+    // in or whether it is committed yet.
+    listedFiles: listings.flatMap((listing) => listing.listedFiles).sort(),
+    trackedButIgnored: listings
+      .flatMap((listing) => listing.trackedButIgnored)
+      .sort(),
+    unlistedRepos: listings.flatMap((listing) => listing.unlistedRepos),
+    fallbackReason: null,
+    fallbackDetails: null,
+  }));
 }
 
 // The walker status used before git listing, unchanged, including its `.git`
 // prefix filter.
-function listWithWalker(fallbackReason: string): Promise<Listing> {
+function listWithWalker(fallback: GitFallback): Promise<Listing> {
   return walk({
     ignoreFiles: ['.gitignore'],
     follow: false,
   }).then((results) => ({
     listedFiles: results.filter((result) => !result.startsWith('.git')),
     trackedButIgnored: [],
-    fallbackReason,
+    unlistedRepos: [],
+    fallbackReason: fallback.message,
+    fallbackDetails: fallback.details,
   }));
 }
 
@@ -250,7 +250,7 @@ export function listFiles(): Promise<Listing> {
     })
     .catch((error) => {
       if (error instanceof GitFallback) {
-        return listWithWalker(error.message);
+        return listWithWalker(error);
       }
       throw error;
     });

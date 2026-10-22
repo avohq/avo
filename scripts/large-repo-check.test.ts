@@ -168,6 +168,31 @@ describe('generateRepo', () => {
         expect(underTheCap).toContain(`Avo.${event}(`);
       });
     });
+
+    // The memory budget assumes 2 bytes per character, which V8 only uses for
+    // a string with a character outside Latin-1.
+    it('puts a character outside Latin-1 near the head of each near-cap file', () => {
+      const repo = generateRepo(path.join(tempRoot(), 'repo'), {
+        shape: 'gated',
+        ...TINY,
+      });
+
+      const generated = path.join(repo.projectFolder, 'src', 'generated');
+      const heads = fs.readdirSync(generated).map((name) => {
+        const fd = fs.openSync(path.join(generated, name), 'r');
+        try {
+          const head = Buffer.alloc(256);
+          const bytesRead = fs.readSync(fd, head, 0, head.length, 0);
+          return head.subarray(0, bytesRead).toString('utf8');
+        } finally {
+          fs.closeSync(fd);
+        }
+      });
+      expect(heads).toHaveLength(repo.counts.nearCap);
+      heads.forEach((head) => {
+        expect(head).toMatch(/[^\u0000-ÿ]/);
+      });
+    });
   });
 
   describe('the reporter shape', () => {
@@ -363,11 +388,25 @@ describe('gateFailures', () => {
       ),
     ).toEqual([
       'candidate on Node v14.18.1 exited 1, not 0',
-      'candidate on Node v14.18.1 found 19 of 20 events',
+      'candidate on Node v14.18.1 found 19 of 20 events, not 20 of 20',
       'candidate on Node v14.18.1 printed no oversized-file warning',
       'baseline on Node v23.3.0 did not run out of memory, so the check proves nothing',
       'candidate on Node v23.3.0 ran out of memory',
     ]);
+  });
+
+  // The repo calls 20 events; a build that read only part of the event map
+  // would otherwise pass with "1 of 1".
+  it('fails a candidate that finds every event it looked for, but not all 20', () => {
+    expect(
+      gateFailures(
+        [
+          { ...passingCandidate, eventsSeen: 1, eventsTotal: 1 },
+          outOfMemoryBaseline,
+        ],
+        gateOptions,
+      ),
+    ).toEqual(['candidate on Node v14.18.1 found 1 of 1 events, not 20 of 20']);
   });
 
   it('fails without both a candidate and a baseline run', () => {
