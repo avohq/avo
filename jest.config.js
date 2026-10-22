@@ -19,6 +19,10 @@ export default {
   // suite test the source it is written against, whether or not `yarn build` ran.
   moduleFileExtensions: ['ts', 'js', 'json', 'node'],
   testMatch: ['**/*.test.ts'],
+  // Claude Code worktrees under .claude/ hold other checkouts' tests. Anchored
+  // to <rootDir>, as the patterns match whole paths and a worktree's own path
+  // has .claude/ in it.
+  testPathIgnorePatterns: ['/node_modules/', '<rootDir>/.claude/'],
   setupFilesAfterEnv: ['<rootDir>/jest.setup.js'],
 };
 

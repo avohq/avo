@@ -40,6 +40,22 @@ Options:
   --help         Show help                                             [boolean]
 ```
 
+### `avo status`
+
+`avo status` lists the files to analyse with git, so it follows your `.gitignore` rules, including ones in folders above the project folder. If git isn't available or can't list the folder, it falls back to walking the folder and warns: `Listed N files without git because <reason>.`
+
+Submodules and other git repos inside the project folder are listed by their own ignore rules. Files in `.github/` and `.gitlab-ci.yml` are analysed when they match a source's glob.
+
+Files over the 10 MiB size cap are never read. Unlike 3.7.0, an event whose only usage is in a file git ignores (including through a parent `.gitignore`, `.git/info/exclude` or a global excludes file) or in a file over the cap is reported missing, and `avo status` exits 1.
+
+It prints one warning, with a count, for each of these: tracked files that match an ignore rule and files over the cap, among the files a source would otherwise analyse, and nested repos git can't list. Add `--verbose` to list them:
+
+- `Skipped N tracked files that match an ignore rule; run with --verbose to list them.`
+- `Skipped N files over the 10 MiB size cap; run with --verbose to list them.`
+- `Skipped N nested repos that git could not list; run with --verbose to list them.`
+
+Warnings don't change the exit code. To stop analysing a file that keeps tripping a warning, narrow the source with `analysis.glob` in `avo.json`.
+
 For more documentation, visit [https://www.avo.app/docs/implementation/cli](https://www.avo.app/docs/implementation/cli)
 
 

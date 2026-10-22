@@ -10,6 +10,7 @@ import {
   jest,
 } from '@jest/globals';
 import os from 'os';
+import logSymbols from 'log-symbols';
 import Configstore from 'configstore';
 import { AvoInspector } from 'node-avo-inspector';
 import {
@@ -42,8 +43,11 @@ import {
   buildSourcePaths,
   resolveInspectorEnv,
   status,
+  statusCommand,
   exitOnUnhandledRejection,
 } from './cli.js';
+import Avo from './Avo.js';
+import { commitAll, git, useIsolatedGit } from './testGit.js';
 
 // Each of these suites runs codegen against the real filesystem, so they need an
 // isolated cwd. Declared once rather than repeated per describe block.
@@ -563,7 +567,9 @@ describe('avo.json merge conflict resolution', () => {
         { libraryInterfaceFileFilter: 'interface-only' },
       );
 
-      expect(message).toContain("kept libraryInterfaceFileFilter 'events-only'");
+      expect(message).toContain(
+        "kept libraryInterfaceFileFilter 'events-only'",
+      );
       expect(message).toContain("incoming had 'interface-only'");
     });
 
@@ -581,7 +587,9 @@ describe('avo.json merge conflict resolution', () => {
         { libraryInterfaceFileFilter: 'events-only' },
         {},
       );
-      expect(missingIncoming).toContain("kept libraryInterfaceFileFilter 'events-only'");
+      expect(missingIncoming).toContain(
+        "kept libraryInterfaceFileFilter 'events-only'",
+      );
       expect(missingIncoming).toContain("incoming had 'all'");
     });
   });
@@ -703,16 +711,18 @@ describe('libraryInterfaceFileFilter', () => {
     // The value is a handle consumed verbatim server-side — a Kotlin package or a
     // TS module specifier. The CLI has no language field and must derive nothing.
     it('returns the value verbatim, whatever shape it has', () => {
-      ['../../shell/AvoLibrary', 'com.acme.analytics', '@acme/analytics'].forEach(
-        (value) => {
-          expect(
-            resolveLibraryInterfaceSharedModule({
-              source: { libraryInterfaceSharedModule: value },
-              json: {},
-            }),
-          ).toBe(value);
-        },
-      );
+      [
+        '../../shell/AvoLibrary',
+        'com.acme.analytics',
+        '@acme/analytics',
+      ].forEach((value) => {
+        expect(
+          resolveLibraryInterfaceSharedModule({
+            source: { libraryInterfaceSharedModule: value },
+            json: {},
+          }),
+        ).toBe(value);
+      });
     });
   });
 
@@ -1296,7 +1306,7 @@ describe('libraryInterfaceFileFilter', () => {
     // hid rejections from the pull command's own .catch analytics path (they
     // still landed on the process-wide unhandledRejection handler, but with a
     // bare process.exit(1) that loses per-command context).
-    it("awaits an async runCodegen before resolving", async () => {
+    it('awaits an async runCodegen before resolving', async () => {
       const json: any = baseJson();
       let resolved = false;
       let releaseCodegen: () => void = () => {};
@@ -1431,7 +1441,9 @@ describe('avo init and libraryInterfaceFileFilter', () => {
       expect('libraryInterfaceFileFilter' in json).toBe(false);
       expect('libraryInterfaceSharedModule' in json).toBe(false);
       expect('libraryInterface' in json).toBe(false);
-      const infoLines = reportInfo.mock.calls.map((c) => String(c[0])).join('\n');
+      const infoLines = reportInfo.mock.calls
+        .map((c) => String(c[0]))
+        .join('\n');
       expect(infoLines).toContain('libraryInterface.fileFilter');
       expect(infoLines).toContain('libraryInterface.sharedModule');
     });
@@ -1521,7 +1533,9 @@ describe('stale files from a previous filter', () => {
     // interface — wording that names the interface would send a user to delete
     // the wrong file.
     it('uses the same wording for an app-side file', () => {
-      const warning = buildStaleSuppressedFileWarning('src/AvoEvents/clicked.ts');
+      const warning = buildStaleSuppressedFileWarning(
+        'src/AvoEvents/clicked.ts',
+      );
 
       expect(warning).toContain('src/AvoEvents/clicked.ts');
       expect(warning).not.toContain('shared interface');
@@ -1691,7 +1705,12 @@ describe('stale files from a previous filter', () => {
           target({ suppressedPaths: ['src/AvoLibrary.ts'] }),
           target({
             id: 'source-2',
-            code: [{ path: 'src/AvoNodeEvents/eventClicked.ts', content: '// event' }],
+            code: [
+              {
+                path: 'src/AvoNodeEvents/eventClicked.ts',
+                content: '// event',
+              },
+            ],
             suppressedPaths: ['src/AvoLibrary.ts'],
           }),
         ],
@@ -1738,7 +1757,10 @@ describe('buildSourcePaths', () => {
   it('puts the interface file in the same folder as the events file', () => {
     expect(
       buildSourcePaths(
-        { folder: 'library/src/main/kotlin/sh/avo/library', filename: 'Avo.kt' },
+        {
+          folder: 'library/src/main/kotlin/sh/avo/library',
+          filename: 'Avo.kt',
+        },
         { interfaceFilename: 'AvoInterface.kt' },
         cwd,
       ),
@@ -1822,6 +1844,768 @@ describe('resolveInspectorEnv', () => {
       env: 'prod',
       warning:
         "Unknown AVO_INSPECTOR_ENV 'development' — must be one of prod, dev, staging; using prod",
+    });
+  });
+});
+
+// status() is driven in-process: jest.setup.js turns process.exit into a no-op,
+// and no auth is needed once avo.json has sources. Each test runs in a project
+// folder that is a fresh git repo, with git isolated from the developer's
+// machine, so files are listed by git unless a test says otherwise. Output is
+// captured through console.log, because spying on the reporter's ESM namespace
+// breaks jest-mock for the whole suite.
+describe('status', () => {
+  const MiB = 1024 * 1024;
+
+  const tempRoot = useIsolatedGit('avo-status-');
+  let logSpy: any;
+  let exitSpy: any;
+
+  beforeEach(() => {
+    const projectFolder = path.join(tempRoot(), 'project');
+    fs.mkdirSync(projectFolder);
+    process.chdir(projectFolder);
+    git('.', 'init', '-q');
+
+    logSpy = jest.spyOn(console, 'log').mockImplementation(() => undefined);
+    exitSpy = jest
+      .spyOn(process, 'exit')
+      .mockImplementation((() => undefined) as any);
+  });
+
+  afterEach(() => {
+    jest.restoreAllMocks();
+  });
+
+  const output = (): string[] =>
+    logSpy.mock.calls.map((call: unknown[]) => call.join(' '));
+
+  const statusJson = (sources: any[]): any => ({
+    avo: { version: 3 },
+    schema: { id: 'schema-1', name: 'Test Workspace' },
+    branch: { id: 'master', name: 'main' },
+    sources,
+  });
+
+  const webSource = { id: 'source-1', name: 'Web', path: 'Avo.ts' };
+  const serverSource = {
+    id: 'source-2',
+    name: 'Server',
+    path: 'server/Server.ts',
+  };
+
+  const writeFile = (filePath: string, contents: string): void => {
+    fs.mkdirSync(path.dirname(filePath), { recursive: true });
+    fs.writeFileSync(filePath, contents);
+  };
+
+  const writeAvoFile = (filePath: string, eventNames: string[]): void =>
+    writeFile(
+      filePath,
+      `// AVOMODULEMAP:"Avo"\n// AVOEVENTMAP:${JSON.stringify(eventNames)}\n`,
+    );
+
+  // Sparse files: the size is real to lstat without writing 10 MiB to disk, and
+  // whatever is written first is still there to be found if the file is read.
+  const writeFileOfSize = (
+    filePath: string,
+    contents: string,
+    size: number,
+  ): void => {
+    writeFile(filePath, contents);
+    fs.truncateSync(filePath, size);
+  };
+
+  const readPaths = (fsSpy: any): string[] =>
+    fsSpy.mock.calls.map((call: unknown[]) => call[0]);
+
+  it('reports where each event is used and resolves once it has', async () => {
+    writeAvoFile('Avo.ts', ['eventOne', 'eventTwo']);
+    writeFile(
+      'src/a.ts',
+      'Avo.eventOne();\nAvo.eventTwo();\nAvo.eventTwo();\n',
+    );
+    writeFile('src/b.ts', 'Avo.eventOne();\n');
+
+    await status(undefined, statusJson([webSource]), { verbose: false });
+
+    expect(output()).toEqual([
+      'sources\n' +
+        '└─ Web (Avo.ts)\n' +
+        '   ├─ eventOne\n' +
+        '   │  ├─ used in src/a.ts: 1 time\n' +
+        '   │  └─ used in src/b.ts: 1 time\n' +
+        '   └─ eventTwo\n' +
+        '      └─ used in src/a.ts: 2 times\n',
+      'info 2 events seen in code',
+    ]);
+    expect(exitSpy).not.toHaveBeenCalled();
+  });
+
+  describe('size cap', () => {
+    it('never reads an oversized file and warns with a count', async () => {
+      writeAvoFile('Avo.ts', ['eventOne']);
+      writeFile('src/a.ts', 'Avo.eventOne();\n');
+      writeFileOfSize('src/bundle.min.js', 'Avo.eventOne();\n', 15 * MiB);
+      const readFileSpy = jest.spyOn(fs, 'readFile');
+
+      await status(undefined, statusJson([webSource]), { verbose: false });
+
+      expect(readPaths(readFileSpy)).not.toContain('src/bundle.min.js');
+      expect(output()).toContain(
+        'warn Skipped 1 file over the 10 MiB size cap; run with --verbose to list it.',
+      );
+      expect(output()).toContain(
+        'sources\n' +
+          '└─ Web (Avo.ts)\n' +
+          '   └─ eventOne\n' +
+          '      └─ used in src/a.ts: 1 time\n',
+      );
+    });
+
+    const writeTwoOversizedFiles = (): void => {
+      writeAvoFile('Avo.ts', ['eventOne']);
+      writeFile('src/a.ts', 'Avo.eventOne();\n');
+      writeFileOfSize('src/vendor/bundle.min.js', '', Math.round(14.2 * MiB));
+      writeFileOfSize('src/generated.ts', '', 10 * MiB + 1);
+    };
+
+    it('counts every oversized file in one warning line', async () => {
+      writeTwoOversizedFiles();
+
+      await status(undefined, statusJson([webSource]), { verbose: false });
+
+      expect(output().filter((line) => line.startsWith('warn'))).toEqual([
+        'warn Skipped 2 files over the 10 MiB size cap; run with --verbose to list them.',
+      ]);
+    });
+
+    it('lists each oversized file with its size in MiB under --verbose', async () => {
+      writeTwoOversizedFiles();
+
+      await status(undefined, statusJson([webSource]), { verbose: true });
+
+      expect(output().filter((line) => line.startsWith('warn'))).toEqual([
+        'warn Skipped 2 files over the 10 MiB size cap:\n' +
+          'src/generated.ts (10.0 MiB)\n' +
+          'src/vendor/bundle.min.js (14.2 MiB)',
+      ]);
+    });
+
+    it('reads a file of exactly 10 MiB and skips one a byte larger', async () => {
+      writeAvoFile('Avo.ts', ['eventOne']);
+      writeFileOfSize('src/at-cap.ts', 'Avo.eventOne();\n', 10 * MiB);
+      writeFileOfSize('src/over-cap.ts', 'Avo.eventOne();\n', 10 * MiB + 1);
+
+      await status(undefined, statusJson([webSource]), { verbose: true });
+
+      expect(output()).toContain(
+        'sources\n' +
+          '└─ Web (Avo.ts)\n' +
+          '   └─ eventOne\n' +
+          '      └─ used in src/at-cap.ts: 1 time\n',
+      );
+      expect(output()).toContain(
+        'warn Skipped 1 file over the 10 MiB size cap:\n' +
+          'src/over-cap.ts (10.0 MiB)',
+      );
+    });
+
+    it('never checks or warns about a huge file outside every effective glob', async () => {
+      writeAvoFile('Avo.ts', ['eventOne']);
+      writeFile('src/a.ts', 'Avo.eventOne();\n');
+      writeFileOfSize('assets/video.mp4', '', 50 * MiB);
+      const lstatSpy = jest.spyOn(fs, 'lstat');
+      const readFileSpy = jest.spyOn(fs, 'readFile');
+
+      await status(undefined, statusJson([webSource]), { verbose: true });
+
+      expect(
+        readPaths(lstatSpy).filter((filePath) =>
+          filePath.endsWith('video.mp4'),
+        ),
+      ).toEqual([]);
+      expect(
+        readPaths(readFileSpy).filter((filePath) =>
+          filePath.endsWith('video.mp4'),
+        ),
+      ).toEqual([]);
+      expect(output().filter((line) => line.startsWith('warn'))).toEqual([]);
+    });
+
+    it('counts a file matched by two sources once', async () => {
+      writeAvoFile('Avo.ts', ['eventOne']);
+      writeAvoFile('server/Server.ts', ['eventTwo']);
+      writeFile('src/a.ts', 'Avo.eventOne();\nAvo.eventTwo();\n');
+      writeFileOfSize('src/huge.ts', '', 12 * MiB);
+
+      await status(undefined, statusJson([webSource, serverSource]), {
+        verbose: true,
+      });
+
+      expect(output().filter((line) => line.startsWith('warn'))).toEqual([
+        'warn Skipped 1 file over the 10 MiB size cap:\n' +
+          'src/huge.ts (12.0 MiB)',
+      ]);
+    });
+  });
+
+  // A tracked file that matches an ignore rule is left out of the listed files,
+  // as before, but never silently when it would have been analysed.
+  describe('tracked-but-ignored files', () => {
+    it('warns once, with a count, about tracked files that match an ignore rule', async () => {
+      writeAvoFile('Avo.ts', ['eventOne']);
+      writeFile('src/a.ts', 'Avo.eventOne();\n');
+      writeFile('src/legacy/old.ts', 'Avo.eventOne();\n');
+      writeFile('src/legacy/older.ts', 'Avo.eventOne();\n');
+      commitAll('.');
+      writeFile('.gitignore', 'legacy/\n');
+
+      await status(undefined, statusJson([webSource]), { verbose: false });
+
+      expect(output()).toEqual([
+        'warn Skipped 2 tracked files that match an ignore rule; run with --verbose to list them.',
+        'sources\n' +
+          '└─ Web (Avo.ts)\n' +
+          '   └─ eventOne\n' +
+          '      └─ used in src/a.ts: 1 time\n',
+        'info 1 events seen in code',
+      ]);
+    });
+
+    it('counts only the ones that match an effective glob', async () => {
+      writeAvoFile('Avo.ts', ['eventOne']);
+      writeFile('src/a.ts', 'Avo.eventOne();\n');
+      writeFile('src/legacy/old.ts', 'Avo.eventOne();\n');
+      writeFile('src/legacy/notes.md', 'Avo.eventOne();\n');
+      writeFile('dist/bundle.css', '');
+      commitAll('.');
+      writeFile('.gitignore', 'legacy/\ndist/\n');
+
+      await status(undefined, statusJson([webSource]), { verbose: false });
+
+      expect(output().filter((line) => line.startsWith('warn'))).toEqual([
+        'warn Skipped 1 tracked file that matches an ignore rule; run with --verbose to list it.',
+      ]);
+    });
+
+    it('says nothing when none of them match an effective glob', async () => {
+      writeAvoFile('Avo.ts', ['eventOne']);
+      writeFile('src/a.ts', 'Avo.eventOne();\n');
+      writeFile('dist/bundle.css', '');
+      writeFile('docs/notes.md', '');
+      commitAll('.');
+      writeFile('.gitignore', 'dist/\n*.md\n');
+
+      await status(undefined, statusJson([webSource]), { verbose: true });
+
+      expect(output().filter((line) => line.startsWith('warn'))).toEqual([]);
+    });
+
+    it('lists them under --verbose', async () => {
+      writeAvoFile('Avo.ts', ['eventOne']);
+      writeFile('src/a.ts', 'Avo.eventOne();\n');
+      writeFile('src/legacy/old.ts', '');
+      writeFile('src/legacy/older.ts', '');
+      commitAll('.');
+      writeFile('.gitignore', 'legacy/\n');
+
+      await status(undefined, statusJson([webSource]), { verbose: true });
+
+      expect(output().filter((line) => line.startsWith('warn'))).toEqual([
+        'warn Skipped 2 tracked files that match an ignore rule:\n' +
+          'src/legacy/old.ts\n' +
+          'src/legacy/older.ts',
+      ]);
+    });
+
+    it('counts a file matched by two sources once', async () => {
+      writeAvoFile('Avo.ts', ['eventOne']);
+      writeAvoFile('server/Server.ts', ['eventTwo']);
+      writeFile('src/a.ts', 'Avo.eventOne();\nAvo.eventTwo();\n');
+      writeFile('src/legacy/old.ts', '');
+      commitAll('.');
+      writeFile('.gitignore', 'legacy/\n');
+
+      await status(undefined, statusJson([webSource, serverSource]), {
+        verbose: false,
+      });
+
+      expect(output().filter((line) => line.startsWith('warn'))).toEqual([
+        'warn Skipped 1 tracked file that matches an ignore rule; run with --verbose to list it.',
+      ]);
+    });
+  });
+
+  // git still lists the rest of the project folder, so the run isn't sent to
+  // the walker, but a nested repo's files never disappear silently.
+  describe('nested repos git cannot list', () => {
+    // A submodule whose gitdir is gone: git fails in its folder.
+    const addBrokenSubmodule = (submodulePath: string): void => {
+      const source = path.join(tempRoot(), path.basename(submodulePath));
+      fs.mkdirSync(source);
+      git(source, 'init', '-q');
+      writeFile(path.join(source, 'lib.ts'), 'Avo.eventOne();\n');
+      commitAll(source);
+      git(
+        '.',
+        '-c',
+        'protocol.file.allow=always',
+        'submodule',
+        'add',
+        '-q',
+        source,
+        submodulePath,
+      );
+      fs.rmSync(path.join('.git', 'modules', submodulePath), {
+        recursive: true,
+        force: true,
+      });
+    };
+
+    it('warns once, with a count, and leaves the exit code alone', async () => {
+      writeAvoFile('Avo.ts', ['eventOne']);
+      writeFile('src/a.ts', 'Avo.eventOne();\n');
+      addBrokenSubmodule('vendor/broken');
+
+      await status(undefined, statusJson([webSource]), { verbose: false });
+
+      expect(output()).toEqual([
+        'warn Skipped 1 nested repo that git could not list; run with --verbose to list it.',
+        'sources\n' +
+          '└─ Web (Avo.ts)\n' +
+          '   └─ eventOne\n' +
+          '      └─ used in src/a.ts: 1 time\n',
+        'info 1 events seen in code',
+      ]);
+      expect(exitSpy).not.toHaveBeenCalled();
+    });
+
+    it("lists each one with git's reason under --verbose", async () => {
+      writeAvoFile('Avo.ts', ['eventOne']);
+      writeFile('src/a.ts', 'Avo.eventOne();\n');
+      addBrokenSubmodule('vendor/first');
+      addBrokenSubmodule('vendor/second');
+
+      await status(undefined, statusJson([webSource]), { verbose: true });
+
+      // What git says after "not a git repository" varies by version.
+      expect(output().filter((line) => line.startsWith('warn'))).toEqual([
+        expect.stringMatching(
+          /^warn Skipped 2 nested repos that git could not list:\nvendor\/first \(not a git repository.*\)\nvendor\/second \(not a git repository.*\)$/,
+        ),
+      ]);
+    });
+  });
+
+  // When git can't list, the walker lists the files instead, as it always did,
+  // and status says why. Everything after listing works the same.
+  describe('falling back to the walker', () => {
+    it.each([
+      {
+        cause: 'outside a git repo',
+        setUp: (): void => {
+          fs.rmSync('.git', { recursive: true, force: true });
+        },
+        warning:
+          'warn Listed 4 files without git because not a git repository (or any of the parent directories): .git.',
+      },
+      {
+        cause: 'when git is not installed',
+        setUp: (): void => {
+          // An empty PATH gives a real ENOENT when git is spawned.
+          const emptyBin = path.join(tempRoot(), 'empty-bin');
+          fs.mkdirSync(emptyBin);
+          process.env.PATH = emptyBin;
+        },
+        warning: 'warn Listed 4 files without git because git was not found.',
+      },
+    ])(
+      'warns once with the reason $cause, and still applies the size cap',
+      async ({ setUp, warning }) => {
+        writeAvoFile('Avo.ts', ['eventOne']);
+        writeAvoFile('server/Server.ts', ['eventTwo']);
+        writeFile('src/a.ts', 'Avo.eventOne();\nAvo.eventTwo();\n');
+        writeFileOfSize('src/bundle.min.js', 'Avo.eventOne();\n', 11 * MiB);
+        setUp();
+        const readFileSpy = jest.spyOn(fs, 'readFile');
+
+        await status(undefined, statusJson([webSource, serverSource]), {
+          verbose: false,
+        });
+
+        expect(readPaths(readFileSpy)).not.toContain('src/bundle.min.js');
+        expect(output().filter((line) => line.startsWith('warn'))).toEqual([
+          warning,
+          'warn Skipped 1 file over the 10 MiB size cap; run with --verbose to list it.',
+        ]);
+      },
+    );
+
+    it('counts a single listed file in the singular', async () => {
+      writeAvoFile('Avo.ts', ['eventOne']);
+      fs.rmSync('.git', { recursive: true, force: true });
+
+      await status(undefined, statusJson([webSource]), { verbose: false });
+
+      expect(output().filter((line) => line.startsWith('warn'))).toEqual([
+        'warn Listed 1 file without git because not a git repository (or any of the parent directories): .git.',
+      ]);
+    });
+
+    // git's whole error can say more than its first line, such as how to mark
+    // a folder with dubious ownership as safe.
+    it("adds git's whole error under --verbose", async () => {
+      writeAvoFile('Avo.ts', ['eventOne']);
+      fs.rmSync('.git', { recursive: true, force: true });
+
+      await status(undefined, statusJson([webSource]), { verbose: true });
+
+      expect(output().filter((line) => line.startsWith('warn'))).toEqual([
+        'warn Listed 1 file without git because not a git repository (or any of the parent directories): .git. git said:\n' +
+          'fatal: not a git repository (or any of the parent directories): .git',
+      ]);
+    });
+
+    it('gives only the reason under --verbose when git did not run', async () => {
+      writeAvoFile('Avo.ts', ['eventOne']);
+      const emptyBin = path.join(tempRoot(), 'empty-bin');
+      fs.mkdirSync(emptyBin);
+      process.env.PATH = emptyBin;
+
+      await status(undefined, statusJson([webSource]), { verbose: true });
+
+      expect(output().filter((line) => line.startsWith('warn'))).toEqual([
+        'warn Listed 1 file without git because git was not found.',
+      ]);
+    });
+  });
+
+  describe('exit code', () => {
+    it('reports an event used only in an oversized file as missing, with the warning on the same run', async () => {
+      writeAvoFile('Avo.ts', ['eventOne', 'eventTwo']);
+      writeFile('src/a.ts', 'Avo.eventOne();\n');
+      writeFileOfSize('src/bundle.min.js', 'Avo.eventTwo();\n', 11 * MiB);
+
+      await status(undefined, statusJson([webSource]), { verbose: false });
+
+      expect(output()).toEqual([
+        'warn Skipped 1 file over the 10 MiB size cap; run with --verbose to list it.',
+        'sources\n' +
+          '└─ Web (Avo.ts)\n' +
+          '   ├─ eventOne\n' +
+          '   │  └─ used in src/a.ts: 1 time\n' +
+          '   └─ eventTwo\n' +
+          `      └─ ${logSymbols.error} no usage found\n`,
+        'info 1 of 2 events seen in code',
+        'error 1 missing event',
+        'missingEvents\n└─ Web (Avo.ts)\n   └─ eventTwo: no usage found\n',
+      ]);
+      expect(exitSpy.mock.calls).toEqual([[1]]);
+    });
+
+    // Tracked-but-ignored files only come from git, and the fallback warning
+    // only from the walker, so each listing prints every warning it can.
+    it.each([
+      {
+        listedBy: 'git',
+        setUp: (): void => undefined,
+        warnings: [
+          'warn Skipped 1 tracked file that matches an ignore rule; run with --verbose to list it.',
+          'warn Skipped 1 file over the 10 MiB size cap; run with --verbose to list it.',
+        ],
+      },
+      {
+        listedBy: 'the walker',
+        setUp: (): void => {
+          fs.rmSync('.git', { recursive: true, force: true });
+        },
+        warnings: [
+          'warn Listed 4 files without git because not a git repository (or any of the parent directories): .git.',
+          'warn Skipped 1 file over the 10 MiB size cap; run with --verbose to list it.',
+        ],
+      },
+    ])(
+      'leaves the exit code alone when every event is found, even with every warning $listedBy can print',
+      async ({ setUp, warnings }) => {
+        writeAvoFile('Avo.ts', ['eventOne']);
+        writeFile('src/legacy/old.ts', 'Avo.eventOne();\n');
+        commitAll('.');
+        writeFile('.gitignore', 'legacy/\n');
+        writeFile('src/a.ts', 'Avo.eventOne();\n');
+        writeFileOfSize('src/bundle.min.js', 'Avo.eventOne();\n', 11 * MiB);
+        setUp();
+
+        await status(undefined, statusJson([webSource]), { verbose: false });
+
+        expect(output().filter((line) => line.startsWith('warn'))).toEqual(
+          warnings,
+        );
+        expect(output()).toContain('info 1 events seen in code');
+        expect(exitSpy).not.toHaveBeenCalled();
+      },
+    );
+  });
+
+  describe('listing order', () => {
+    // Listing order puts `src/x.ts` before `src/x.ts-y.ts`, but sorting the
+    // "used in" lines with localeCompare would put `-` before `:` and swap them.
+    const listedFiles = ['src/x.ts', 'src/x.ts-y.ts', 'src/z.ts'];
+
+    // Holds each listed file's read until all of them are in flight, then
+    // finishes them last-listed first.
+    const finishReadsInReverseOrder = (): void => {
+      const realReadFile = fs.readFile;
+      const held = new Map<string, () => void>();
+      jest.spyOn(fs, 'readFile').mockImplementation(((
+        filePath: string,
+        encoding: string,
+        callback: (error: unknown, data?: unknown) => void,
+      ) => {
+        realReadFile(filePath, encoding as any, (error, data) => {
+          if (!listedFiles.includes(filePath)) {
+            callback(error, data);
+            return;
+          }
+          held.set(filePath, () => callback(error, data));
+          if (held.size === listedFiles.length) {
+            [...listedFiles]
+              .reverse()
+              .forEach((heldPath) => held.get(heldPath)());
+          }
+        });
+      }) as any);
+    };
+
+    it('prints the "used in" lines and the --verbose file list in listing order', async () => {
+      writeAvoFile('Avo.ts', ['eventOne']);
+      listedFiles.forEach((filePath) =>
+        writeFile(filePath, 'Avo.eventOne();\n'),
+      );
+      finishReadsInReverseOrder();
+
+      await status(undefined, statusJson([webSource]), { verbose: true });
+
+      expect(output()).toContain(
+        'info Looking in files: src/x.ts\nsrc/x.ts-y.ts\nsrc/z.ts',
+      );
+      expect(output()).toContain(
+        'sources\n' +
+          '└─ Web (Avo.ts)\n' +
+          '   └─ eventOne\n' +
+          '      ├─ used in src/x.ts: 1 time\n' +
+          '      ├─ used in src/x.ts-y.ts: 1 time\n' +
+          '      └─ used in src/z.ts: 1 time\n',
+      );
+    });
+  });
+
+  describe('reads', () => {
+    // 16 reads at the 10 MiB cap is the memory budget the spec signs off on.
+    it('never has more than 16 reads in flight', async () => {
+      writeAvoFile('Avo.ts', ['eventOne']);
+      for (let index = 0; index < 40; index += 1) {
+        writeFile(`src/file${index}.ts`, 'Avo.eventOne();\n');
+      }
+      const realReadFile = fs.readFile;
+      let inFlight = 0;
+      let maxInFlight = 0;
+      jest.spyOn(fs, 'readFile').mockImplementation(((
+        filePath: string,
+        encoding: string,
+        callback: (error: unknown, data?: unknown) => void,
+      ) => {
+        inFlight += 1;
+        maxInFlight = Math.max(maxInFlight, inFlight);
+        setTimeout(() => {
+          realReadFile(filePath, encoding as any, (error, data) => {
+            inFlight -= 1;
+            callback(error, data);
+          });
+        }, 1);
+      }) as any);
+
+      await status(undefined, statusJson([webSource]), { verbose: false });
+
+      expect(maxInFlight).toBe(16);
+      expect(output()[0].match(/used in src\/file/g)).toHaveLength(40);
+    });
+
+    it('skips symlinks', async () => {
+      writeAvoFile('Avo.ts', ['eventOne']);
+      writeFile('src/a.ts', 'Avo.eventOne();\n');
+      fs.symlinkSync('a.ts', 'src/link.ts');
+      const readFileSpy = jest.spyOn(fs, 'readFile');
+
+      await status(undefined, statusJson([webSource]), { verbose: false });
+
+      expect(readPaths(readFileSpy)).not.toContain('src/link.ts');
+      expect(output()).toContain(
+        'sources\n' +
+          '└─ Web (Avo.ts)\n' +
+          '   └─ eventOne\n' +
+          '      └─ used in src/a.ts: 1 time\n',
+      );
+    });
+
+    // git still lists a tracked file once its folder is replaced by a symlink,
+    // but lstat only sees the file itself. 3.7.0's walker never followed
+    // symlinks, so nothing outside the project folder is read.
+    it('skips a file whose folder is a symlink to outside the project folder', async () => {
+      writeAvoFile('Avo.ts', ['eventOne', 'eventTwo']);
+      writeFile('src/a.ts', 'Avo.eventOne();\n');
+      writeFile('lib/calls.ts', 'Avo.eventTwo();\n');
+      commitAll('.');
+      // A sibling whose path starts with the project folder's.
+      const outside = path.join(tempRoot(), 'project-outside');
+      writeFile(path.join(outside, 'calls.ts'), 'Avo.eventTwo();\n');
+      fs.rmSync('lib', { recursive: true, force: true });
+      fs.symlinkSync(outside, 'lib');
+      const readFileSpy = jest.spyOn(fs, 'readFile');
+
+      await status(undefined, statusJson([webSource]), { verbose: false });
+
+      expect(readPaths(readFileSpy)).not.toContain('lib/calls.ts');
+      expect(output()).toContain(
+        'sources\n' +
+          '└─ Web (Avo.ts)\n' +
+          '   ├─ eventOne\n' +
+          '   │  └─ used in src/a.ts: 1 time\n' +
+          '   └─ eventTwo\n' +
+          `      └─ ${logSymbols.error} no usage found\n`,
+      );
+      expect(exitSpy.mock.calls).toEqual([[1]]);
+    });
+
+    it('tolerates a listed file deleted from disk, or one it cannot read', async () => {
+      writeAvoFile('Avo.ts', ['eventOne']);
+      writeFile('src/a.ts', 'Avo.eventOne();\n');
+      writeFile('src/deleted.ts', 'Avo.eventOne();\n');
+      writeFile('src/unreadable.ts', 'Avo.eventOne();\n');
+      // Deleted after listing, as a file missing from a sparse checkout or
+      // removed mid-run would be.
+      const realLstat = fs.lstat;
+      jest.spyOn(fs, 'lstat').mockImplementation(((
+        filePath: string,
+        callback: (error: unknown, stats?: unknown) => void,
+      ) => {
+        if (filePath === 'src/deleted.ts') {
+          fs.unlinkSync(filePath);
+        }
+        realLstat(filePath, callback);
+      }) as any);
+      // Unreadable through the spy rather than chmod 000, which root can
+      // still read.
+      const realReadFile = fs.readFile;
+      jest.spyOn(fs, 'readFile').mockImplementation(((
+        filePath: string,
+        encoding: string,
+        callback: (error: unknown, data?: unknown) => void,
+      ) => {
+        if (filePath === 'src/unreadable.ts') {
+          callback(
+            Object.assign(new Error('EACCES: permission denied'), {
+              code: 'EACCES',
+            }),
+          );
+          return;
+        }
+        realReadFile(filePath, encoding as any, callback);
+      }) as any);
+
+      await status(undefined, statusJson([webSource]), { verbose: true });
+
+      expect(output()).toContain(
+        'warn Failed to read file stats: src/deleted.ts',
+      );
+      expect(output()).toContain(
+        'warn Failed to parse file: src/unreadable.ts',
+      );
+      expect(output()).toContain(
+        'sources\n' +
+          '└─ Web (Avo.ts)\n' +
+          '   └─ eventOne\n' +
+          '      └─ used in src/a.ts: 1 time\n',
+      );
+      expect(exitSpy).not.toHaveBeenCalled();
+    });
+
+    // git lists what is in its index, so a tracked file can be listed without
+    // being on disk.
+    it('tolerates a tracked file deleted from disk, or left out by a sparse checkout', async () => {
+      writeAvoFile('Avo.ts', ['eventOne']);
+      writeFile('src/a.ts', 'Avo.eventOne();\n');
+      writeFile('src/deleted.ts', 'Avo.eventOne();\n');
+      writeFile('lib/sparse.ts', 'Avo.eventOne();\n');
+      commitAll('.');
+      git('.', 'sparse-checkout', 'set', 'src');
+      fs.unlinkSync('src/deleted.ts');
+
+      await status(undefined, statusJson([webSource]), { verbose: true });
+
+      expect(fs.existsSync('lib/sparse.ts')).toBe(false);
+      expect(output()).toContain(
+        'warn Failed to read file stats: lib/sparse.ts',
+      );
+      expect(output()).toContain(
+        'warn Failed to read file stats: src/deleted.ts',
+      );
+      expect(output()).toContain(
+        'sources\n' +
+          '└─ Web (Avo.ts)\n' +
+          '   └─ eventOne\n' +
+          '      └─ used in src/a.ts: 1 time\n',
+      );
+      expect(exitSpy).not.toHaveBeenCalled();
+    });
+  });
+
+  // The `status [source]` command counts each run once in the CLI's analytics.
+  describe('the status command', () => {
+    let cliInvokedSpy: any;
+
+    beforeEach(() => {
+      cliInvokedSpy = jest
+        .spyOn(Avo, 'cliInvoked')
+        .mockImplementation(() => undefined);
+    });
+
+    it('sends one cliInvoked event when status fails', async () => {
+      writeFile('avo.json', JSON.stringify(statusJson([webSource])));
+      writeFile('Avo.ts', '// AVOEVENTMAP:[notJson]\n');
+
+      await expect(statusCommand({ verbose: false })).rejects.toThrow(
+        SyntaxError,
+      );
+
+      expect(cliInvokedSpy.mock.calls).toEqual([
+        [
+          expect.objectContaining({
+            schemaId: 'schema-1',
+            cliAction: Avo.CliAction.STATUS,
+          }),
+        ],
+      ]);
+    });
+
+    it('sends one cliInvoked event, without the workspace, when avo.json fails to load', async () => {
+      writeFile(
+        'avo.json',
+        JSON.stringify({ ...statusJson([webSource]), avo: { version: 99 } }),
+      );
+
+      await expect(statusCommand({ verbose: false })).rejects.toThrow(
+        'Your avo CLI is outdated, please update',
+      );
+
+      expect(cliInvokedSpy.mock.calls).toEqual([
+        [
+          expect.objectContaining({
+            schemaId: 'N/A',
+            cliAction: Avo.CliAction.STATUS,
+          }),
+        ],
+      ]);
     });
   });
 });

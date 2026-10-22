@@ -20,7 +20,6 @@ import updateNotifier from 'update-notifier';
 import url from 'url';
 import util from 'util';
 import { v4 as uuidv4 } from 'uuid';
-import walk from 'ignore-walk';
 import writeFile from 'write';
 import { writeJsonFile } from 'write-json-file';
 import Configstore from 'configstore';
@@ -32,6 +31,8 @@ import fuzzypath from 'inquirer-fuzzy-path';
 
 import * as report from './reporter.js';
 import Avo from './Avo.js';
+import { listFiles } from './listing.js';
+import type { Listing, UnlistedRepo } from './listing.js';
 
 declare global {
   namespace NodeJS {
@@ -2237,242 +2238,486 @@ function getSource(argv, json: AvoJson): Promise<[string, AvoJson]> {
   return Promise.resolve([argv.source, json]);
 }
 
-export function status(source: string, json, argv: any): void {
+const MIB = 1024 * 1024;
+
+// The size cap and the read concurrency are one memory budget: concurrency × cap
+// × about 3 (a JS string can take 2 bytes per character, plus the lines from
+// splitting) stays under about a quarter of a 2 GB heap. Changing either number
+// means re-checking the other.
+const SIZE_CAP_BYTES = 10 * MIB;
+const STATUS_READ_CONCURRENCY = 16;
+
+type OversizedFile = { filePath: string; size: number };
+
+// One line with a count, however many files it counts; the files themselves,
+// one per line, only under --verbose.
+function buildCountedWarning(
+  summary: string,
+  lines: string[],
+  verbose: boolean,
+): string {
+  if (!verbose) {
+    return `${summary}; run with --verbose to list ${
+      lines.length === 1 ? 'it' : 'them'
+    }.`;
+  }
+  return [`${summary}:`, ...lines].join('\n');
+}
+
+// Sizes are in MiB, never MB, to match how the cap is named.
+function buildOversizedFileWarning(
+  oversizedFiles: OversizedFile[],
+  verbose: boolean,
+): string {
+  const count = oversizedFiles.length;
+  return buildCountedWarning(
+    `Skipped ${count} ${count === 1 ? 'file' : 'files'} over the ${
+      SIZE_CAP_BYTES / MIB
+    } MiB size cap`,
+    oversizedFiles.map(
+      ({ filePath, size }) => `${filePath} (${(size / MIB).toFixed(1)} MiB)`,
+    ),
+    verbose,
+  );
+}
+
+function buildTrackedButIgnoredWarning(
+  filePaths: string[],
+  verbose: boolean,
+): string {
+  const count = filePaths.length;
+  return buildCountedWarning(
+    `Skipped ${count} tracked ${
+      count === 1 ? 'file that matches' : 'files that match'
+    } an ignore rule`,
+    filePaths,
+    verbose,
+  );
+}
+
+function buildUnlistedRepoWarning(
+  unlistedRepos: UnlistedRepo[],
+  verbose: boolean,
+): string {
+  const count = unlistedRepos.length;
+  return buildCountedWarning(
+    `Skipped ${count} nested ${
+      count === 1 ? 'repo' : 'repos'
+    } that git could not list`,
+    unlistedRepos.map(
+      ({ path: repoPath, reason }) => `${repoPath} (${reason})`,
+    ),
+    verbose,
+  );
+}
+
+// git's whole error only under --verbose: the reason is its first line.
+function buildFallbackWarning(listing: Listing, verbose: boolean): string {
+  const count = listing.listedFiles.length;
+  const summary = `Listed ${count} ${
+    count === 1 ? 'file' : 'files'
+  } without git because ${listing.fallbackReason}.`;
+  return verbose && listing.fallbackDetails !== null
+    ? `${summary} git said:\n${listing.fallbackDetails}`
+    : summary;
+}
+
+// Resolves with the results in item order, whatever order the tasks finish in.
+function mapWithConcurrency<T, R>(
+  items: T[],
+  concurrency: number,
+  task: (item: T) => Promise<R>,
+): Promise<R[]> {
+  const results: R[] = new Array(items.length);
+  let nextIndex = 0;
+  const runNext = (): Promise<void> => {
+    if (nextIndex >= items.length) {
+      return Promise.resolve();
+    }
+    const index = nextIndex;
+    nextIndex += 1;
+    return task(items[index]).then((result) => {
+      results[index] = result;
+      return runNext();
+    });
+  };
+  return Promise.all(
+    Array.from({ length: Math.min(concurrency, items.length) }, runNext),
+  ).then(() => results);
+}
+
+// What a source analyses with, worked out from its generated file before any
+// listed file is read.
+type SourceAnalysis = {
+  eventMap: string[];
+  moduleName: string;
+  sourcePathExts: string[];
+  // The effective glob, then the source's own generated file and events folder.
+  globs: Minimatch[];
+  // One per event, in event map order.
+  eventPatterns: RegExp[];
+};
+
+function getSourceAnalysis(
+  source,
+  data: string,
+  verbose: boolean,
+): SourceAnalysis | null {
+  const eventMap = getEventMap(data, verbose);
+  if (eventMap === null) {
+    return null;
+  }
+  const moduleMap = getModuleMap(data, verbose);
+  const sourcePath = path.parse(source.path);
+  const moduleName =
+    source.analysis?.module ?? moduleMap ?? sourcePath.name ?? 'Avo';
+
+  const sourcePathExts = [];
+
+  if (sourcePath.ext === '.js' || sourcePath.ext === '.ts') {
+    sourcePathExts.push('js');
+    sourcePathExts.push('jsx');
+    sourcePathExts.push('ts');
+    sourcePathExts.push('tsx');
+  } else if (sourcePath.ext === '.java' || sourcePath.ext === '.kt') {
+    sourcePathExts.push('java');
+    sourcePathExts.push('kt');
+  } else if (sourcePath.ext === '.m' || sourcePath.ext === '.swift') {
+    sourcePathExts.push('m');
+    sourcePathExts.push('swift');
+  } else if (sourcePath.ext === '.re') {
+    sourcePathExts.push('re');
+    sourcePathExts.push('res');
+  } else {
+    sourcePathExts.push(sourcePath.ext.substring(1));
+  }
+
+  const eventsDir = getEventsDirectoryPath(source.path, moduleName);
+  const globs: Minimatch[] = [
+    new Minimatch(
+      source.analysis?.glob ?? `**/*.+(${sourcePathExts.join('|')})`,
+      {},
+    ),
+    new Minimatch(`!${source.path}`, {}),
+    new Minimatch(`!${eventsDir}/**`, {}),
+  ];
+
+  // Check if file-per-event mode is active
+  const isFilePerEvent = isFilePerEventMode(source.path, moduleName);
+
+  const eventPatterns = eventMap.map((eventName) => {
+    // Build regex pattern based on mode
+    // In file-per-event mode, events can be called without module prefix
+    let pattern: string;
+    if (isFilePerEvent) {
+      // File-per-event mode: support both with and without module prefix
+      // Pattern matches: Module.eventName, [Module eventName, eventName(, [eventName
+      pattern = `(${moduleName}\\.${eventName}|\\[${moduleName} ${eventName}|${eventName}\\(|\\[${eventName})`;
+    } else {
+      // Legacy mode: only match with module prefix
+      pattern = `(${moduleName}\\.${eventName}|\\[${moduleName} ${eventName})`;
+    }
+    return new RegExp(pattern);
+  });
+
+  return { eventMap, moduleName, sourcePathExts, globs, eventPatterns };
+}
+
+// `count` is how many of the file's lines use the event.
+type EventUsage = { filePath: string; count: number };
+
+type StatusSourceResults = {
+  name: string;
+  path: string;
+  // Event name -> usages, in listing order.
+  results: { [eventName: string]: EventUsage[] };
+};
+
+// What became of a listed file that matched some source's effective glob. A
+// symlink, a file outside the project folder, or a file that couldn't be
+// checked or read, has none (null).
+type StatusFileOutcome =
+  | ({ kind: 'oversized' } & OversizedFile)
+  | {
+      kind: 'analysed';
+      filePath: string;
+      // Per matching source index, [event map index, number of lines using
+      // the event] for each event the file uses. Kept until the run ends for
+      // every analysed file, so events it doesn't use take no room.
+      usageCounts: Map<number, [number, number][]>;
+    };
+
+function isInsideFolder(folder: string, filePath: string): boolean {
+  const relative = path.relative(folder, filePath);
+  return (
+    relative !== '' &&
+    relative !== '..' &&
+    !relative.startsWith(`..${path.sep}`) &&
+    !path.isAbsolute(relative)
+  );
+}
+
+// lstat first, so an oversized file is never read. `projectFolder` is a real
+// path.
+function analyseFile(
+  filePath: string,
+  sourceIndexes: number[],
+  analyses: SourceAnalysis[],
+  projectFolder: string,
+  verbose: boolean,
+): Promise<StatusFileOutcome | null> {
+  return pify(fs.lstat)(filePath)
+    .then((stats) => {
+      if (stats.isSymbolicLink()) {
+        return null;
+      }
+      // git still lists a tracked path once a folder above it is replaced by
+      // a symlink, which lstat doesn't see. Like a symlink, a file whose real
+      // path is outside the project folder is skipped.
+      return pify(fs.realpath.native)(filePath).then((realPath: string) => {
+        if (!isInsideFolder(projectFolder, realPath)) {
+          return null;
+        }
+        if (stats.size > SIZE_CAP_BYTES) {
+          return { kind: 'oversized', filePath, size: stats.size };
+        }
+        return pify(fs.readFile)(filePath, 'utf8')
+          .then((data: string) => ({
+            kind: 'analysed',
+            filePath,
+            // The contents are dropped as soon as they are matched.
+            usageCounts: new Map(
+              sourceIndexes.map((sourceIndex) => [
+                sourceIndex,
+                analyses[sourceIndex].eventPatterns.flatMap(
+                  (re, eventIndex) => {
+                    const count = findMatches(data, re).length;
+                    return count > 0 ? [[eventIndex, count]] : [];
+                  },
+                ),
+              ]),
+            ),
+          }))
+          .catch(() => {
+            if (verbose) {
+              report.warn(`Failed to parse file: ${filePath}`);
+            }
+            return null;
+          });
+      });
+    })
+    .catch(() => {
+      if (verbose) {
+        report.warn(`Failed to read file stats: ${filePath}`);
+      }
+      return null;
+    });
+}
+
+export function status(source: string, json, argv: any): Promise<void> {
   let sources = source
     ? json.sources.filter((s) => matchesSource(s, source))
     : json.sources;
 
   sources = sources.filter(({ analysis }) => analysis !== false);
-  const fileCache = walk({
-    ignoreFiles: ['.gitignore'],
-    follow: false,
-  }).then((results) =>
-    Promise.all(
-      results
-        .filter((result) => !result.startsWith('.git'))
-        .map((resultPath) =>
-          pify(fs.lstat)(resultPath)
-            .then((stats) => {
-              if (stats.isSymbolicLink()) {
-                return null;
-              }
-              return pify(fs.readFile)(resultPath, 'utf8')
-                .then((data) => [resultPath, data])
-                .catch(() => {
-                  if (argv.verbose) {
-                    report.warn(`Failed to parse file: ${resultPath}`);
-                  }
-                  return null;
-                });
-            })
-            .catch(() => {
-              if (argv.verbose) {
-                report.warn(`Failed to read file stats: ${resultPath}`);
-              }
-              return null;
-            }),
-        ),
-    ).then((cachePairs) =>
-      // Filter out null values and create object from valid pairs
-      Object.fromEntries(cachePairs.filter((pair) => pair != null)),
-    ),
-  );
 
-  fileCache
-    .then((cache) => {
-      sources = Promise.all(
+  return Promise.all([listFiles(), pify(fs.realpath.native)('.')])
+    .then(([listing, projectFolder]: [Listing, string]) =>
+      Promise.all(
         sources.map((source) =>
-          pify(fs.readFile)(source.path, 'utf8').then((data) => {
-            const eventMap = getEventMap(data, argv.verbose);
-            if (eventMap !== null) {
-              const moduleMap = getModuleMap(data, argv.verbose);
-              const sourcePath = path.parse(source.path);
-              const moduleName =
-                source.analysis?.module ??
-                moduleMap ??
-                sourcePath.name ??
-                'Avo';
-
-              const sourcePathExts = [];
-
-              if (sourcePath.ext === '.js' || sourcePath.ext === '.ts') {
-                sourcePathExts.push('js');
-                sourcePathExts.push('jsx');
-                sourcePathExts.push('ts');
-                sourcePathExts.push('tsx');
-              } else if (
-                sourcePath.ext === '.java' ||
-                sourcePath.ext === '.kt'
-              ) {
-                sourcePathExts.push('java');
-                sourcePathExts.push('kt');
-              } else if (
-                sourcePath.ext === '.m' ||
-                sourcePath.ext === '.swift'
-              ) {
-                sourcePathExts.push('m');
-                sourcePathExts.push('swift');
-              } else if (sourcePath.ext === '.re') {
-                sourcePathExts.push('re');
-                sourcePathExts.push('res');
-              } else {
-                sourcePathExts.push(sourcePath.ext.substring(1));
-              }
-
-              if (argv.verbose) {
-                console.log(
-                  'Looking in files with extensions:',
-                  sourcePathExts,
-                );
-              }
-
-              const eventsDir = getEventsDirectoryPath(source.path, moduleName);
-              const globs: Minimatch[] = [
-                new Minimatch(
-                  source.analysis?.glob ??
-                    `**/*.+(${sourcePathExts.join('|')})`,
-                  {},
-                ),
-                new Minimatch(`!${source.path}`, {}),
-                new Minimatch(`!${eventsDir}/**`, {}),
-              ];
-
-              const lookup: { [key: string]: string } = {};
-              Object.entries(cache).forEach(([cachePath, value]) => {
-                if (globs.every((mm) => mm.match(cachePath))) {
-                  lookup[cachePath] = value;
-                }
-              });
-
-              if (argv.verbose) {
-                const combinedPaths: string[] = [];
-
-                Object.entries(lookup).forEach(([path, _data]) => {
-                  combinedPaths.push(path);
-                });
-
-                report.info(`Looking for events: ${eventMap.join('\n')}`);
-                report.info(`Looking in module: ${moduleName}`);
-                report.info(`Looking in files: ${combinedPaths.join('\n')}`);
-              }
-
-              // Check if file-per-event mode is active
-              const isFilePerEvent = isFilePerEventMode(
-                source.path,
-                moduleName,
-              );
-
-              return Promise.all(
-                eventMap.map((eventName) => {
-                  // Build regex pattern based on mode
-                  // In file-per-event mode, events can be called without module prefix
-                  let pattern: string;
-                  if (isFilePerEvent) {
-                    // File-per-event mode: support both with and without module prefix
-                    // Pattern matches: Module.eventName, [Module eventName, eventName(, [eventName
-                    pattern = `(${moduleName}\\.${eventName}|\\[${moduleName} ${eventName}|${eventName}\\(|\\[${eventName})`;
-                  } else {
-                    // Legacy mode: only match with module prefix
-                    pattern = `(${moduleName}\\.${eventName}|\\[${moduleName} ${eventName})`;
-                  }
-                  const re = new RegExp(pattern);
-                  const results = Object.entries(lookup)
-                    .map(([path, data]) => {
-                      const results = findMatches(data, re);
-                      return results.length ? [[path, results]] : [];
-                    })
-                    .flat();
-                  return [eventName, Object.fromEntries(results)];
-                }),
-              ).then((results) => ({
-                ...source,
-                results: Object.fromEntries(results),
-              }));
-            }
-            return source;
-          }),
+          pify(fs.readFile)(source.path, 'utf8').then((data: string) =>
+            getSourceAnalysis(source, data, argv.verbose),
+          ),
         ),
-      );
+      ).then((analyses) => {
+        const matchingSourceIndexes = (filePath: string): number[] =>
+          analyses.flatMap((analysis, sourceIndex) =>
+            analysis !== null &&
+            analysis.globs.every((mm) => mm.match(filePath))
+              ? [sourceIndex]
+              : [],
+          );
 
-      return sources.then((sources) => {
-        report.tree(
-          'sources',
-          sources.map((source) => ({
-            name: `${source.name} (${source.path})`,
-            children: Object.entries(source.results).map(
-              ([eventName, results]) => ({
-                name: eventName,
-                children:
-                  Object.keys(results).length > 0
-                    ? Object.entries(results).map(([matchFile, result]) => ({
-                        name: `used in ${matchFile}: ${result.length}${
-                          result.length === 1 ? ' time' : ' times'
-                        }`,
-                      }))
-                    : [
-                        {
-                          name: `${logSymbols.error} no usage found`,
-                        },
-                      ],
-              }),
-            ),
-          })),
+        // No listed file is checked or read unless it matches some effective glob.
+        const matchedFiles = listing.listedFiles
+          .map((filePath) => ({
+            filePath,
+            sourceIndexes: matchingSourceIndexes(filePath),
+          }))
+          .filter(({ sourceIndexes }) => sourceIndexes.length > 0);
+
+        // Tracked-but-ignored files are only announced when they would have
+        // been analysed.
+        const matchingTrackedButIgnored = listing.trackedButIgnored.filter(
+          (filePath) => matchingSourceIndexes(filePath).length > 0,
         );
 
-        const totalEvents = sources
-          .map(({ results }) => Object.keys(results).length)
-          .reduce(sum, 0);
-
-        const missingEvents = sources
-          .map(
-            ({ results }) =>
-              Object.values(results).filter(
-                (missing) => Object.keys(missing).length === 0,
-              ).length,
-          )
-          .reduce(sum, 0);
-
-        if (missingEvents === 0) {
-          if (totalEvents === 0) {
-            report.error(
-              'no events found in the avo file - please run avo pull',
-            );
-          } else {
-            report.info(`${totalEvents} events seen in code`);
+        return mapWithConcurrency(
+          matchedFiles,
+          STATUS_READ_CONCURRENCY,
+          ({ filePath, sourceIndexes }) =>
+            analyseFile(
+              filePath,
+              sourceIndexes,
+              analyses,
+              projectFolder,
+              argv.verbose,
+            ),
+        ).then((outcomes) => ({
+          listing,
+          analyses,
+          outcomes,
+          matchingTrackedButIgnored,
+        }));
+      }),
+    )
+    .then(({ listing, analyses, outcomes, matchingTrackedButIgnored }) => {
+      const sourcesWithResults: StatusSourceResults[] = sources.map(
+        (source, sourceIndex) => {
+          const analysis = analyses[sourceIndex];
+          if (analysis === null) {
+            // No event map: left without results, as before.
+            return source;
           }
+          // Listing order, whatever order the reads finished in.
+          const analysedFiles = outcomes.flatMap((outcome) =>
+            outcome?.kind === 'analysed' && outcome.usageCounts.has(sourceIndex)
+              ? [outcome]
+              : [],
+          );
+
+          if (argv.verbose) {
+            console.log(
+              'Looking in files with extensions:',
+              analysis.sourcePathExts,
+            );
+            report.info(`Looking for events: ${analysis.eventMap.join('\n')}`);
+            report.info(`Looking in module: ${analysis.moduleName}`);
+            report.info(
+              `Looking in files: ${analysedFiles
+                .map(({ filePath }) => filePath)
+                .join('\n')}`,
+            );
+          }
+
+          const usages: EventUsage[][] = analysis.eventMap.map(() => []);
+          analysedFiles.forEach(({ filePath, usageCounts }) => {
+            usageCounts.get(sourceIndex).forEach(([eventIndex, count]) => {
+              usages[eventIndex].push({ filePath, count });
+            });
+          });
+          return {
+            ...source,
+            results: Object.fromEntries(
+              analysis.eventMap.map((eventName, eventIndex) => [
+                eventName,
+                usages[eventIndex],
+              ]),
+            ),
+          };
+        },
+      );
+
+      // Each warning prints at most once per run, and none changes the exit code.
+      if (listing.fallbackReason !== null) {
+        report.warn(buildFallbackWarning(listing, argv.verbose));
+      }
+      if (listing.unlistedRepos.length > 0) {
+        report.warn(
+          buildUnlistedRepoWarning(listing.unlistedRepos, argv.verbose),
+        );
+      }
+      if (matchingTrackedButIgnored.length > 0) {
+        report.warn(
+          buildTrackedButIgnoredWarning(
+            matchingTrackedButIgnored,
+            argv.verbose,
+          ),
+        );
+      }
+
+      // A file matched by several sources is one outcome, so it counts once.
+      const oversizedFiles = outcomes.flatMap((outcome) =>
+        outcome?.kind === 'oversized' ? [outcome] : [],
+      );
+      if (oversizedFiles.length > 0) {
+        report.warn(buildOversizedFileWarning(oversizedFiles, argv.verbose));
+      }
+
+      report.tree(
+        'sources',
+        sourcesWithResults.map((source) => ({
+          name: `${source.name} (${source.path})`,
+          children: Object.entries(source.results).map(
+            ([eventName, usages]) => ({
+              name: eventName,
+              // "used in" lines stay in listing order, so output can be diffed.
+              sortChildren: false,
+              children:
+                usages.length > 0
+                  ? usages.map(({ filePath, count }) => ({
+                      name: `used in ${filePath}: ${count}${
+                        count === 1 ? ' time' : ' times'
+                      }`,
+                    }))
+                  : [
+                      {
+                        name: `${logSymbols.error} no usage found`,
+                      },
+                    ],
+            }),
+          ),
+        })),
+      );
+
+      const totalEvents = sourcesWithResults
+        .map(({ results }) => Object.keys(results).length)
+        .reduce(sum, 0);
+
+      const missingEvents = sourcesWithResults
+        .map(
+          ({ results }) =>
+            Object.values(results).filter((usages) => usages.length === 0)
+              .length,
+        )
+        .reduce(sum, 0);
+
+      if (missingEvents === 0) {
+        if (totalEvents === 0) {
+          report.error('no events found in the avo file - please run avo pull');
         } else {
-          report.info(
-            `${
-              totalEvents - missingEvents
-            } of ${totalEvents} events seen in code`,
-          );
+          report.info(`${totalEvents} events seen in code`);
         }
-        if (missingEvents > 0) {
-          report.error(
-            `${missingEvents} missing ${
-              missingEvents > 1 ? 'events' : 'event'
-            }`,
-          );
-          report.tree(
-            'missingEvents',
-            sources.map((source) => ({
-              name: `${source.name} (${source.path})`,
-              children: Object.entries(source.results)
-                .map(([eventName, results]) =>
-                  Object.keys(results).length === 0
-                    ? [
-                        {
-                          name: `${red(eventName)}: no usage found`,
-                        },
-                      ]
-                    : [],
-                )
-                .flat(),
-            })),
-          );
-          exitAfterInspectorFlush(1);
-        }
-      });
+      } else {
+        report.info(
+          `${totalEvents - missingEvents} of ${totalEvents} events seen in code`,
+        );
+      }
+      if (missingEvents > 0) {
+        report.error(
+          `${missingEvents} missing ${missingEvents > 1 ? 'events' : 'event'}`,
+        );
+        report.tree(
+          'missingEvents',
+          sourcesWithResults.map((source) => ({
+            name: `${source.name} (${source.path})`,
+            children: Object.entries(source.results)
+              .map(([eventName, usages]) =>
+                usages.length === 0
+                  ? [
+                      {
+                        name: `${red(eventName)}: no usage found`,
+                      },
+                    ]
+                  : [],
+              )
+              .flat(),
+          })),
+        );
+        // Returned, so `await status()` covers the flush and the exit.
+        return exitAfterInspectorFlush(1);
+      }
+      return undefined;
     })
     .catch((error) => {
       if (error.code === 'ENOENT') {
@@ -2483,6 +2728,43 @@ export function status(source: string, json, argv: any): void {
         throw error;
       }
     });
+}
+
+// The `status [source]` command. Its cliInvoked event goes out once per run:
+// without the workspace when avo.json can't be loaded, and not again when
+// status() itself fails.
+export function statusCommand(argv): Promise<void> {
+  return loadAvoJsonOrInit({ argv, skipInit: false, skipPullMaster: false })
+    .then((json) => {
+      Avo.cliInvoked({
+        schemaId: json.schema.id,
+        schemaName: json.schema.name,
+        branchId: json.branch.id,
+        branchName: json.branch.name,
+        userId_: installIdOrUserId(),
+        cliAction: Avo.CliAction.STATUS,
+        cliInvokedByCi: invokedByCi(),
+        force: undefined,
+        forceFeatures: undefined,
+      });
+      report.info(`Currently on branch '${json.branch.name}'`);
+      return getSource(argv, json);
+    })
+    .catch((error) => {
+      Avo.cliInvoked({
+        schemaId: 'N/A',
+        schemaName: 'N/A',
+        branchId: 'N/A',
+        branchName: 'N/A',
+        userId_: installIdOrUserId(),
+        cliAction: Avo.CliAction.STATUS,
+        cliInvokedByCi: invokedByCi(),
+        force: undefined,
+        forceFeatures: undefined,
+      });
+      throw error;
+    })
+    .then(([source, json]) => status(source, json, argv));
 }
 
 /// //////////////////////////////////////////////////////////////////////
@@ -3156,37 +3438,7 @@ if (isMainModule) {
         command: 'status [source]',
         describe: 'Show the status of the Avo implementation',
         handler: (argv) => {
-          loadAvoJsonOrInit({ argv, skipInit: false, skipPullMaster: false })
-            .then((json) => {
-              Avo.cliInvoked({
-                schemaId: json.schema.id,
-                schemaName: json.schema.name,
-                branchId: json.branch.id,
-                branchName: json.branch.name,
-                userId_: installIdOrUserId(),
-                cliAction: Avo.CliAction.STATUS,
-                cliInvokedByCi: invokedByCi(),
-                force: undefined,
-                forceFeatures: undefined,
-              });
-              report.info(`Currently on branch '${json.branch.name}'`);
-              return getSource(argv, json);
-            })
-            .then(([source, json]) => status(source, json, argv))
-            .catch((error) => {
-              Avo.cliInvoked({
-                schemaId: 'N/A',
-                schemaName: 'N/A',
-                branchId: 'N/A',
-                branchName: 'N/A',
-                userId_: installIdOrUserId(),
-                cliAction: Avo.CliAction.STATUS,
-                cliInvokedByCi: invokedByCi(),
-                force: undefined,
-                forceFeatures: undefined,
-              });
-              throw error;
-            });
+          statusCommand(argv);
         },
       })
       .command({
