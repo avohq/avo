@@ -2696,6 +2696,43 @@ export function status(source: string, json, argv: any): Promise<void> {
     });
 }
 
+// The `status [source]` command. Its cliInvoked event goes out once per run:
+// without the workspace when avo.json can't be loaded, and not again when
+// status() itself fails.
+export function statusCommand(argv): Promise<void> {
+  return loadAvoJsonOrInit({ argv, skipInit: false, skipPullMaster: false })
+    .then((json) => {
+      Avo.cliInvoked({
+        schemaId: json.schema.id,
+        schemaName: json.schema.name,
+        branchId: json.branch.id,
+        branchName: json.branch.name,
+        userId_: installIdOrUserId(),
+        cliAction: Avo.CliAction.STATUS,
+        cliInvokedByCi: invokedByCi(),
+        force: undefined,
+        forceFeatures: undefined,
+      });
+      report.info(`Currently on branch '${json.branch.name}'`);
+      return getSource(argv, json);
+    })
+    .catch((error) => {
+      Avo.cliInvoked({
+        schemaId: 'N/A',
+        schemaName: 'N/A',
+        branchId: 'N/A',
+        branchName: 'N/A',
+        userId_: installIdOrUserId(),
+        cliAction: Avo.CliAction.STATUS,
+        cliInvokedByCi: invokedByCi(),
+        force: undefined,
+        forceFeatures: undefined,
+      });
+      throw error;
+    })
+    .then(([source, json]) => status(source, json, argv));
+}
+
 /// //////////////////////////////////////////////////////////////////////
 // AUTH
 
@@ -3367,37 +3404,7 @@ if (isMainModule) {
         command: 'status [source]',
         describe: 'Show the status of the Avo implementation',
         handler: (argv) => {
-          loadAvoJsonOrInit({ argv, skipInit: false, skipPullMaster: false })
-            .then((json) => {
-              Avo.cliInvoked({
-                schemaId: json.schema.id,
-                schemaName: json.schema.name,
-                branchId: json.branch.id,
-                branchName: json.branch.name,
-                userId_: installIdOrUserId(),
-                cliAction: Avo.CliAction.STATUS,
-                cliInvokedByCi: invokedByCi(),
-                force: undefined,
-                forceFeatures: undefined,
-              });
-              report.info(`Currently on branch '${json.branch.name}'`);
-              return getSource(argv, json);
-            })
-            .then(([source, json]) => status(source, json, argv))
-            .catch((error) => {
-              Avo.cliInvoked({
-                schemaId: 'N/A',
-                schemaName: 'N/A',
-                branchId: 'N/A',
-                branchName: 'N/A',
-                userId_: installIdOrUserId(),
-                cliAction: Avo.CliAction.STATUS,
-                cliInvokedByCi: invokedByCi(),
-                force: undefined,
-                forceFeatures: undefined,
-              });
-              throw error;
-            });
+          statusCommand(argv);
         },
       })
       .command({

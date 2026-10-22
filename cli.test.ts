@@ -41,7 +41,9 @@ import {
   buildSourcePaths,
   resolveInspectorEnv,
   status,
+  statusCommand,
 } from './cli.js';
+import Avo from './Avo.js';
 import { commitAll, git, useIsolatedGit } from './testGit.js';
 
 // Each of these suites runs codegen against the real filesystem, so they need an
@@ -2517,6 +2519,55 @@ describe('status', () => {
           '      └─ used in src/a.ts: 1 time\n',
       );
       expect(exitSpy).not.toHaveBeenCalled();
+    });
+  });
+
+  // The `status [source]` command counts each run once in the CLI's analytics.
+  describe('the status command', () => {
+    let cliInvokedSpy: any;
+
+    beforeEach(() => {
+      cliInvokedSpy = jest
+        .spyOn(Avo, 'cliInvoked')
+        .mockImplementation(() => undefined);
+    });
+
+    it('sends one cliInvoked event when status fails', async () => {
+      writeFile('avo.json', JSON.stringify(statusJson([webSource])));
+      writeFile('Avo.ts', '// AVOEVENTMAP:[notJson]\n');
+
+      await expect(statusCommand({ verbose: false })).rejects.toThrow(
+        SyntaxError,
+      );
+
+      expect(cliInvokedSpy.mock.calls).toEqual([
+        [
+          expect.objectContaining({
+            schemaId: 'schema-1',
+            cliAction: Avo.CliAction.STATUS,
+          }),
+        ],
+      ]);
+    });
+
+    it('sends one cliInvoked event, without the workspace, when avo.json fails to load', async () => {
+      writeFile(
+        'avo.json',
+        JSON.stringify({ ...statusJson([webSource]), avo: { version: 99 } }),
+      );
+
+      await expect(statusCommand({ verbose: false })).rejects.toThrow(
+        'Your avo CLI is outdated, please update',
+      );
+
+      expect(cliInvokedSpy.mock.calls).toEqual([
+        [
+          expect.objectContaining({
+            schemaId: 'N/A',
+            cliAction: Avo.CliAction.STATUS,
+          }),
+        ],
+      ]);
     });
   });
 });
