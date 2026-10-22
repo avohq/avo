@@ -1,7 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import { describe, it, expect, jest } from '@jest/globals';
-import { listFiles } from './listing.js';
+import { listFiles, splitRepoEntries } from './listing.js';
 import { commitAll, git, useIsolatedGit } from './testGit.js';
 
 // Building a fixture with submodules runs a few dozen git commands, which
@@ -443,6 +443,101 @@ describe('listFiles', () => {
         trackedButIgnored: [],
         fallbackReason: 'the project folder is ignored by git',
       });
+    });
+  });
+});
+
+describe('splitRepoEntries', () => {
+  const sorted = ({ files, nestedRepos, trackedButIgnored }) => ({
+    files: [...files].sort(),
+    nestedRepos: [...nestedRepos].sort(),
+    trackedButIgnored: [...trackedButIgnored].sort(),
+  });
+
+  it('splits tracked and untracked files from gitlinks and nested repos', () => {
+    expect(
+      sorted(
+        splitRepoEntries(
+          [
+            '100644 a1 0\tsrc/a.ts',
+            '160000 b2 0\tlibs/core',
+            '100755 e5 0\tbin/run',
+          ],
+          ['src/new.ts', 'tools/lib/'],
+          [],
+        ),
+      ),
+    ).toEqual({
+      files: ['bin/run', 'src/a.ts', 'src/new.ts'],
+      nestedRepos: ['libs/core', 'tools/lib'],
+      trackedButIgnored: [],
+    });
+  });
+
+  it('leaves out ignored files and does not list ignored gitlinks at all', () => {
+    expect(
+      sorted(
+        splitRepoEntries(
+          [
+            '100644 a1 0\tsrc/a.ts',
+            '160000 b2 0\tlibs/core',
+            '100644 c3 0\tdist/out.js',
+            '160000 d4 0\tvendor/sub',
+          ],
+          ['src/new.ts', 'tools/lib/'],
+          ['dist/out.js', 'vendor/sub'],
+        ),
+      ),
+    ).toEqual({
+      files: ['src/a.ts', 'src/new.ts'],
+      nestedRepos: ['libs/core', 'tools/lib'],
+      trackedButIgnored: ['dist/out.js', 'vendor/sub'],
+    });
+  });
+
+  it('lists a path in a merge conflict once', () => {
+    expect(
+      sorted(
+        splitRepoEntries(
+          [
+            '100644 a1 1\tsrc/conflict.ts',
+            '100644 a2 2\tsrc/conflict.ts',
+            '100644 a3 3\tsrc/conflict.ts',
+            '100644 c1 1\tdist/out.js',
+            '100644 c2 2\tdist/out.js',
+          ],
+          [],
+          ['dist/out.js', 'dist/out.js'],
+        ),
+      ),
+    ).toEqual({
+      files: ['src/conflict.ts'],
+      nestedRepos: [],
+      trackedButIgnored: ['dist/out.js'],
+    });
+  });
+
+  it('keeps tabs, spaces and non-ASCII characters in paths', () => {
+    expect(
+      sorted(
+        splitRepoEntries(
+          ['100644 a1 0\tsrc/tab\there.ts', '160000 b2 0\tlibs/my lib'],
+          ['src/café.ts', 'tools/ünï/'],
+          [],
+        ),
+      ),
+    ).toEqual({
+      files: ['src/café.ts', 'src/tab\there.ts'],
+      nestedRepos: ['libs/my lib', 'tools/ünï'],
+      trackedButIgnored: [],
+    });
+  });
+
+  it('returns empty lists for an empty repo', () => {
+    expect(splitRepoEntries([], [], [])).toEqual({
+      files: [],
+      nestedRepos: [],
+      trackedButIgnored: [],
     });
   });
 });
