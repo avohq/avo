@@ -408,6 +408,8 @@ describe('listFiles', () => {
         listedFiles: ['src/a.ts'],
         trackedButIgnored: [],
         fallbackReason:
+          'not a git repository (or any of the parent directories): .git',
+        fallbackDetails:
           'fatal: not a git repository (or any of the parent directories): .git',
       });
     });
@@ -427,6 +429,7 @@ describe('listFiles', () => {
         listedFiles: ['src/a.ts'],
         trackedButIgnored: [],
         fallbackReason: 'git was not found',
+        fallbackDetails: null,
       });
     });
 
@@ -442,6 +445,7 @@ describe('listFiles', () => {
         listedFiles: ['src/a.ts'],
         trackedButIgnored: [],
         fallbackReason: 'the project folder is ignored by git',
+        fallbackDetails: null,
       });
     });
 
@@ -462,6 +466,7 @@ describe('listFiles', () => {
         listedFiles: ['src/a.ts', 'src/b.ts'],
         trackedButIgnored: [],
         fallbackReason: 'the project folder is ignored by git',
+        fallbackDetails: null,
       });
     });
   });

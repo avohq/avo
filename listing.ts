@@ -8,11 +8,22 @@ export type Listing = {
   trackedButIgnored: string[];
   // Why git couldn't list and the walker did instead; null when git listed.
   fallbackReason: string | null;
+  // git's whole error output behind fallbackReason, which can say more, such
+  // as how to trust a folder with dubious ownership; null when git didn't run
+  // or didn't fail.
+  fallbackDetails: string | null;
 };
 
 // Thrown when git can't list the project folder; its message is the reason
 // carried by the walker's listing.
-class GitFallback extends Error {}
+class GitFallback extends Error {
+  constructor(
+    message: string,
+    readonly details: string | null = null,
+  ) {
+    super(message);
+  }
+}
 
 type GitResult = { code: number; stdout: Buffer; stderr: string };
 
@@ -48,10 +59,15 @@ function runGit(args: string[], cwd = '.'): Promise<GitResult> {
 }
 
 // git's first line of stderr says why it failed, e.g. "fatal: not a git
-// repository (or any of the parent directories): .git".
+// repository (or any of the parent directories): .git". The reason leaves out
+// "fatal: ", which reads oddly after "because".
 function gitFailure({ code, stderr }: GitResult): GitFallback {
   const firstLine = stderr.split('\n').find((line) => line.trim() !== '');
-  return new GitFallback(firstLine?.trim() ?? `git exited with code ${code}`);
+  const details = stderr.trim();
+  return new GitFallback(
+    firstLine?.trim().replace(/^fatal: /, '') ?? `git exited with code ${code}`,
+    details === '' ? null : details,
+  );
 }
 
 // Listings use `-z` and split on NUL: without `-z`, git quotes non-ASCII paths.
@@ -231,20 +247,22 @@ function listWithGit(): Promise<Listing> {
           .sort(),
         trackedButIgnored: [...ignored].sort(),
         fallbackReason: null,
+        fallbackDetails: null,
       };
     });
 }
 
 // The walker status used before git listing, unchanged, including its `.git`
 // prefix filter.
-function listWithWalker(fallbackReason: string): Promise<Listing> {
+function listWithWalker(fallback: GitFallback): Promise<Listing> {
   return walk({
     ignoreFiles: ['.gitignore'],
     follow: false,
   }).then((results) => ({
     listedFiles: results.filter((result) => !result.startsWith('.git')),
     trackedButIgnored: [],
-    fallbackReason,
+    fallbackReason: fallback.message,
+    fallbackDetails: fallback.details,
   }));
 }
 
@@ -261,7 +279,7 @@ export function listFiles(): Promise<Listing> {
     })
     .catch((error) => {
       if (error instanceof GitFallback) {
-        return listWithWalker(error.message);
+        return listWithWalker(error);
       }
       throw error;
     });

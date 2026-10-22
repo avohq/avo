@@ -32,6 +32,7 @@ import fuzzypath from 'inquirer-fuzzy-path';
 import * as report from './reporter.js';
 import Avo from './Avo.js';
 import { listFiles } from './listing.js';
+import type { Listing } from './listing.js';
 
 declare global {
   namespace NodeJS {
@@ -2267,6 +2268,17 @@ function buildTrackedButIgnoredWarning(
   );
 }
 
+// git's whole error only under --verbose: the reason is its first line.
+function buildFallbackWarning(listing: Listing, verbose: boolean): string {
+  const count = listing.listedFiles.length;
+  const summary = `Listed ${count} ${
+    count === 1 ? 'file' : 'files'
+  } without git because ${listing.fallbackReason}.`;
+  return verbose && listing.fallbackDetails !== null
+    ? `${summary} git said:\n${listing.fallbackDetails}`
+    : summary;
+}
+
 // Resolves with the results in item order, whatever order the tasks finish in.
 function mapWithConcurrency<T, R>(
   items: T[],
@@ -2533,12 +2545,7 @@ export function status(source: string, json, argv: any): Promise<void> {
 
       // Each warning prints at most once per run, and none changes the exit code.
       if (listing.fallbackReason !== null) {
-        const count = listing.listedFiles.length;
-        report.warn(
-          `Listed ${count} ${count === 1 ? 'file' : 'files'} without git because ${
-            listing.fallbackReason
-          }.`,
-        );
+        report.warn(buildFallbackWarning(listing, argv.verbose));
       }
       if (matchingTrackedButIgnored.length > 0) {
         report.warn(

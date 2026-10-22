@@ -2123,7 +2123,7 @@ describe('status', () => {
           fs.rmSync('.git', { recursive: true, force: true });
         },
         warning:
-          'warn Listed 4 files without git because fatal: not a git repository (or any of the parent directories): .git.',
+          'warn Listed 4 files without git because not a git repository (or any of the parent directories): .git.',
       },
       {
         cause: 'when git is not installed',
@@ -2164,7 +2164,34 @@ describe('status', () => {
       await status(undefined, statusJson([webSource]), { verbose: false });
 
       expect(output().filter((line) => line.startsWith('warn'))).toEqual([
-        'warn Listed 1 file without git because fatal: not a git repository (or any of the parent directories): .git.',
+        'warn Listed 1 file without git because not a git repository (or any of the parent directories): .git.',
+      ]);
+    });
+
+    // git's whole error can say more than its first line, such as how to mark
+    // a folder with dubious ownership as safe.
+    it("adds git's whole error under --verbose", async () => {
+      writeAvoFile('Avo.ts', ['eventOne']);
+      fs.rmSync('.git', { recursive: true, force: true });
+
+      await status(undefined, statusJson([webSource]), { verbose: true });
+
+      expect(output().filter((line) => line.startsWith('warn'))).toEqual([
+        'warn Listed 1 file without git because not a git repository (or any of the parent directories): .git. git said:\n' +
+          'fatal: not a git repository (or any of the parent directories): .git',
+      ]);
+    });
+
+    it('gives only the reason under --verbose when git did not run', async () => {
+      writeAvoFile('Avo.ts', ['eventOne']);
+      const emptyBin = path.join(tempRoot(), 'empty-bin');
+      fs.mkdirSync(emptyBin);
+      process.env.PATH = emptyBin;
+
+      await status(undefined, statusJson([webSource]), { verbose: true });
+
+      expect(output().filter((line) => line.startsWith('warn'))).toEqual([
+        'warn Listed 1 file without git because git was not found.',
       ]);
     });
   });
@@ -2209,7 +2236,7 @@ describe('status', () => {
           fs.rmSync('.git', { recursive: true, force: true });
         },
         warnings: [
-          'warn Listed 4 files without git because fatal: not a git repository (or any of the parent directories): .git.',
+          'warn Listed 4 files without git because not a git repository (or any of the parent directories): .git.',
           'warn Skipped 1 file over the 10 MiB size cap; run with --verbose to list it.',
         ],
       },
