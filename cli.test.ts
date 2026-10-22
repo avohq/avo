@@ -2113,6 +2113,67 @@ describe('status', () => {
     });
   });
 
+  // git still lists the rest of the project folder, so the run isn't sent to
+  // the walker, but a nested repo's files never disappear silently.
+  describe('nested repos git cannot list', () => {
+    // A submodule whose gitdir is gone: git fails in its folder.
+    const addBrokenSubmodule = (submodulePath: string): void => {
+      const source = path.join(tempRoot(), path.basename(submodulePath));
+      fs.mkdirSync(source);
+      git(source, 'init', '-q');
+      writeFile(path.join(source, 'lib.ts'), 'Avo.eventOne();\n');
+      commitAll(source);
+      git(
+        '.',
+        '-c',
+        'protocol.file.allow=always',
+        'submodule',
+        'add',
+        '-q',
+        source,
+        submodulePath,
+      );
+      fs.rmSync(path.join('.git', 'modules', submodulePath), {
+        recursive: true,
+        force: true,
+      });
+    };
+
+    it('warns once, with a count, and leaves the exit code alone', async () => {
+      writeAvoFile('Avo.ts', ['eventOne']);
+      writeFile('src/a.ts', 'Avo.eventOne();\n');
+      addBrokenSubmodule('vendor/broken');
+
+      await status(undefined, statusJson([webSource]), { verbose: false });
+
+      expect(output()).toEqual([
+        'warn Skipped 1 nested repo that git could not list; run with --verbose to list it.',
+        'sources\n' +
+          '└─ Web (Avo.ts)\n' +
+          '   └─ eventOne\n' +
+          '      └─ used in src/a.ts: 1 time\n',
+        'info 1 events seen in code',
+      ]);
+      expect(exitSpy).not.toHaveBeenCalled();
+    });
+
+    it("lists each one with git's reason under --verbose", async () => {
+      writeAvoFile('Avo.ts', ['eventOne']);
+      writeFile('src/a.ts', 'Avo.eventOne();\n');
+      addBrokenSubmodule('vendor/first');
+      addBrokenSubmodule('vendor/second');
+
+      await status(undefined, statusJson([webSource]), { verbose: true });
+
+      // What git says after "not a git repository" varies by version.
+      expect(output().filter((line) => line.startsWith('warn'))).toEqual([
+        expect.stringMatching(
+          /^warn Skipped 2 nested repos that git could not list:\nvendor\/first \(not a git repository.*\)\nvendor\/second \(not a git repository.*\)$/,
+        ),
+      ]);
+    });
+  });
+
   // When git can't list, the walker lists the files instead, as it always did,
   // and status says why. Everything after listing works the same.
   describe('falling back to the walker', () => {

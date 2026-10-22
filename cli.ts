@@ -32,7 +32,7 @@ import fuzzypath from 'inquirer-fuzzy-path';
 import * as report from './reporter.js';
 import Avo from './Avo.js';
 import { listFiles } from './listing.js';
-import type { Listing } from './listing.js';
+import type { Listing, UnlistedRepo } from './listing.js';
 
 declare global {
   namespace NodeJS {
@@ -2268,6 +2268,22 @@ function buildTrackedButIgnoredWarning(
   );
 }
 
+function buildUnlistedRepoWarning(
+  unlistedRepos: UnlistedRepo[],
+  verbose: boolean,
+): string {
+  const count = unlistedRepos.length;
+  return buildCountedWarning(
+    `Skipped ${count} nested ${
+      count === 1 ? 'repo' : 'repos'
+    } that git could not list`,
+    unlistedRepos.map(
+      ({ path: repoPath, reason }) => `${repoPath} (${reason})`,
+    ),
+    verbose,
+  );
+}
+
 // git's whole error only under --verbose: the reason is its first line.
 function buildFallbackWarning(listing: Listing, verbose: boolean): string {
   const count = listing.listedFiles.length;
@@ -2546,6 +2562,11 @@ export function status(source: string, json, argv: any): Promise<void> {
       // Each warning prints at most once per run, and none changes the exit code.
       if (listing.fallbackReason !== null) {
         report.warn(buildFallbackWarning(listing, argv.verbose));
+      }
+      if (listing.unlistedRepos.length > 0) {
+        report.warn(
+          buildUnlistedRepoWarning(listing.unlistedRepos, argv.verbose),
+        );
       }
       if (matchingTrackedButIgnored.length > 0) {
         report.warn(
