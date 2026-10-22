@@ -503,6 +503,13 @@ Avo.initAvo(
   customAnalyticsDestination,
 );
 
+// The SDK sends what's left of its batch on 'beforeExit', which process.exit()
+// skips, so exits that can follow an event flush first. flush() never rejects;
+// the timeout caps how long a slow network holds the exit.
+function exitAfterInspectorFlush(code: number): Promise<never> {
+  return inspector.flush(2000).then(() => process.exit(code));
+}
+
 type Branch = {
   name: string;
   id: string;
@@ -844,7 +851,8 @@ function requireAuth<T>(
 
   if (!user || !tokens) {
     report.error(`Command requires authentication. Run ${cmd('avo login')}`);
-    process.exit(1);
+    // Never resolves, so callers' chains stop here until the process exits.
+    return exitAfterInspectorFlush(1) as never;
   }
 
   argv.user = user; // eslint-disable-line no-param-reassign
@@ -2443,7 +2451,7 @@ function status(source: string, json, argv: any): void {
                 .flat(),
             })),
           );
-          process.exit(1);
+          exitAfterInspectorFlush(1);
         }
       });
     })
@@ -3517,7 +3525,7 @@ if (isMainModule) {
       // @ts-ignore
       // console.error(err.stack);
 
-      process.exit(1);
+      exitAfterInspectorFlush(1);
     });
   }
 }
