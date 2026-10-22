@@ -11,6 +11,8 @@ import {
 } from '@jest/globals';
 import os from 'os';
 import logSymbols from 'log-symbols';
+import Configstore from 'configstore';
+import { AvoInspector } from 'node-avo-inspector';
 import {
   getEventsDirectoryPath,
   isFilePerEventMode,
@@ -42,6 +44,7 @@ import {
   resolveInspectorEnv,
   status,
   statusCommand,
+  exitOnUnhandledRejection,
 } from './cli.js';
 import Avo from './Avo.js';
 import { commitAll, git, useIsolatedGit } from './testGit.js';
@@ -564,7 +567,9 @@ describe('avo.json merge conflict resolution', () => {
         { libraryInterfaceFileFilter: 'interface-only' },
       );
 
-      expect(message).toContain("kept libraryInterfaceFileFilter 'events-only'");
+      expect(message).toContain(
+        "kept libraryInterfaceFileFilter 'events-only'",
+      );
       expect(message).toContain("incoming had 'interface-only'");
     });
 
@@ -582,7 +587,9 @@ describe('avo.json merge conflict resolution', () => {
         { libraryInterfaceFileFilter: 'events-only' },
         {},
       );
-      expect(missingIncoming).toContain("kept libraryInterfaceFileFilter 'events-only'");
+      expect(missingIncoming).toContain(
+        "kept libraryInterfaceFileFilter 'events-only'",
+      );
       expect(missingIncoming).toContain("incoming had 'all'");
     });
   });
@@ -704,16 +711,18 @@ describe('libraryInterfaceFileFilter', () => {
     // The value is a handle consumed verbatim server-side — a Kotlin package or a
     // TS module specifier. The CLI has no language field and must derive nothing.
     it('returns the value verbatim, whatever shape it has', () => {
-      ['../../shell/AvoLibrary', 'com.acme.analytics', '@acme/analytics'].forEach(
-        (value) => {
-          expect(
-            resolveLibraryInterfaceSharedModule({
-              source: { libraryInterfaceSharedModule: value },
-              json: {},
-            }),
-          ).toBe(value);
-        },
-      );
+      [
+        '../../shell/AvoLibrary',
+        'com.acme.analytics',
+        '@acme/analytics',
+      ].forEach((value) => {
+        expect(
+          resolveLibraryInterfaceSharedModule({
+            source: { libraryInterfaceSharedModule: value },
+            json: {},
+          }),
+        ).toBe(value);
+      });
     });
   });
 
@@ -1297,7 +1306,7 @@ describe('libraryInterfaceFileFilter', () => {
     // hid rejections from the pull command's own .catch analytics path (they
     // still landed on the process-wide unhandledRejection handler, but with a
     // bare process.exit(1) that loses per-command context).
-    it("awaits an async runCodegen before resolving", async () => {
+    it('awaits an async runCodegen before resolving', async () => {
       const json: any = baseJson();
       let resolved = false;
       let releaseCodegen: () => void = () => {};
@@ -1432,7 +1441,9 @@ describe('avo init and libraryInterfaceFileFilter', () => {
       expect('libraryInterfaceFileFilter' in json).toBe(false);
       expect('libraryInterfaceSharedModule' in json).toBe(false);
       expect('libraryInterface' in json).toBe(false);
-      const infoLines = reportInfo.mock.calls.map((c) => String(c[0])).join('\n');
+      const infoLines = reportInfo.mock.calls
+        .map((c) => String(c[0]))
+        .join('\n');
       expect(infoLines).toContain('libraryInterface.fileFilter');
       expect(infoLines).toContain('libraryInterface.sharedModule');
     });
@@ -1522,7 +1533,9 @@ describe('stale files from a previous filter', () => {
     // interface — wording that names the interface would send a user to delete
     // the wrong file.
     it('uses the same wording for an app-side file', () => {
-      const warning = buildStaleSuppressedFileWarning('src/AvoEvents/clicked.ts');
+      const warning = buildStaleSuppressedFileWarning(
+        'src/AvoEvents/clicked.ts',
+      );
 
       expect(warning).toContain('src/AvoEvents/clicked.ts');
       expect(warning).not.toContain('shared interface');
@@ -1692,7 +1705,12 @@ describe('stale files from a previous filter', () => {
           target({ suppressedPaths: ['src/AvoLibrary.ts'] }),
           target({
             id: 'source-2',
-            code: [{ path: 'src/AvoNodeEvents/eventClicked.ts', content: '// event' }],
+            code: [
+              {
+                path: 'src/AvoNodeEvents/eventClicked.ts',
+                content: '// event',
+              },
+            ],
             suppressedPaths: ['src/AvoLibrary.ts'],
           }),
         ],
@@ -1739,7 +1757,10 @@ describe('buildSourcePaths', () => {
   it('puts the interface file in the same folder as the events file', () => {
     expect(
       buildSourcePaths(
-        { folder: 'library/src/main/kotlin/sh/avo/library', filename: 'Avo.kt' },
+        {
+          folder: 'library/src/main/kotlin/sh/avo/library',
+          filename: 'Avo.kt',
+        },
         { interfaceFilename: 'AvoInterface.kt' },
         cwd,
       ),
@@ -2585,6 +2606,117 @@ describe('status', () => {
           }),
         ],
       ]);
+    });
+  });
+});
+
+describe('Inspector flush before an error exit', () => {
+  // node-avo-inspector 2.0 sends the rest of its batch on 'beforeExit', which
+  // process.exit() skips. Each error exit that can follow the command's Inspector
+  // event must finish inspector.flush() before it exits, or that event is lost.
+  const avoTs = fs.readFileSync(path.resolve('Avo.ts'), 'utf8');
+  let flushStarted: Promise<void>;
+  let releaseFlush: () => void;
+  let flushSpy: ReturnType<typeof jest.spyOn>;
+  let exitSpy: ReturnType<typeof jest.spyOn>;
+  let logSpy: ReturnType<typeof jest.spyOn>;
+
+  beforeEach(() => {
+    let markStarted: () => void = () => undefined;
+    flushStarted = new Promise((resolve) => {
+      markStarted = resolve;
+    });
+    const flushDone = new Promise<boolean>((resolve) => {
+      releaseFlush = () => resolve(true);
+    });
+    flushSpy = jest
+      .spyOn(AvoInspector.prototype, 'flush')
+      .mockImplementation(() => {
+        markStarted();
+        return flushDone;
+      });
+    exitSpy = jest
+      .spyOn(process, 'exit')
+      .mockImplementation((() => undefined) as never);
+    logSpy = jest.spyOn(console, 'log').mockImplementation(() => undefined);
+  });
+
+  afterEach(() => {
+    jest.restoreAllMocks();
+  });
+
+  // Holds the exit's flush open, checks nothing exited during it, then lets it end.
+  const expectExitAfterFlush = async (): Promise<void> => {
+    await flushStarted;
+    expect(flushSpy).toHaveBeenCalledWith(2000);
+    expect(exitSpy).not.toHaveBeenCalled();
+
+    releaseFlush();
+    await new Promise((resolve) => {
+      setImmediate(resolve);
+    });
+    expect(exitSpy).toHaveBeenCalledTimes(1);
+    expect(exitSpy).toHaveBeenCalledWith(1);
+  };
+
+  describe('when the command needs a login', () => {
+    useTempCwd();
+    let previousToken: string | undefined;
+
+    beforeEach(() => {
+      previousToken = process.env.AVO_TOKEN;
+      delete process.env.AVO_TOKEN;
+      jest.spyOn(Configstore.prototype, 'get').mockReturnValue(undefined);
+    });
+
+    afterEach(() => {
+      if (previousToken !== undefined) {
+        process.env.AVO_TOKEN = previousToken;
+      }
+    });
+
+    it('flushes, then exits, without running the command', async () => {
+      const initFn = jest.fn<typeof init>();
+
+      const loaded = loadAvoJsonOrInit({
+        argv: {},
+        skipInit: false,
+        skipPullMaster: false,
+        initFn,
+      });
+
+      await expectExitAfterFlush();
+      await loaded;
+      expect(initFn).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('when avo status finds events missing from the code', () => {
+    useTempCwd();
+
+    it('flushes, then exits', async () => {
+      fs.writeFileSync('Avo.ts', avoTs);
+
+      status('', { sources: [{ id: 'cli', name: 'Cli', path: 'Avo.ts' }] }, {});
+
+      await expectExitAfterFlush();
+      expect(logSpy).toHaveBeenCalledWith(
+        expect.stringContaining('error'),
+        expect.stringMatching(/missing events?$/),
+      );
+    });
+  });
+
+  describe('on an unhandled rejection', () => {
+    it('reports the error, flushes, then exits', async () => {
+      const exited = exitOnUnhandledRejection(new Error('boom'));
+
+      await expectExitAfterFlush();
+      await exited;
+      expect(logSpy).toHaveBeenCalledWith(
+        expect.stringContaining('error'),
+        'boom',
+      );
     });
   });
 });

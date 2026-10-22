@@ -6,6 +6,8 @@ Warn when `avo status` skips files that git tracks but your ignore rules match. 
 Note that `avo status` may now report an event that 3.7.0 found as missing, and exit 1, when its only usage is in a file git ignores (including through a parent `.gitignore`, `.git/info/exclude` or a global excludes file) or in a file over the size cap
 Analyse `.github/` and `.gitlab-ci.yml` in `avo status` when they match a source's glob; the previous folder walk always skipped them
 List each submodule and other git repo inside the project folder in `avo status` by its own ignore rules, and warn with a count when git can't list one. Run with `--verbose` to list them with git's reason
+Upgrade the Inspector SDK to node-avo-inspector 2.0.0
+Send the CLI's own Inspector event before exiting with an error (not logged in, events missing in `avo status`, or an unexpected error), where it used to be lost
 
 ## 3.7.0 (2026-10-16)
 
