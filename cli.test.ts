@@ -10,6 +10,7 @@ import {
   jest,
 } from '@jest/globals';
 import os from 'os';
+import logSymbols from 'log-symbols';
 import {
   getEventsDirectoryPath,
   isFilePerEventMode,
@@ -2422,6 +2423,35 @@ describe('status', () => {
           '   └─ eventOne\n' +
           '      └─ used in src/a.ts: 1 time\n',
       );
+    });
+
+    // git still lists a tracked file once its folder is replaced by a symlink,
+    // but lstat only sees the file itself. 3.7.0's walker never followed
+    // symlinks, so nothing outside the project folder is read.
+    it('skips a file whose folder is a symlink to outside the project folder', async () => {
+      writeAvoFile('Avo.ts', ['eventOne', 'eventTwo']);
+      writeFile('src/a.ts', 'Avo.eventOne();\n');
+      writeFile('lib/calls.ts', 'Avo.eventTwo();\n');
+      commitAll('.');
+      // A sibling whose path starts with the project folder's.
+      const outside = path.join(tempRoot(), 'project-outside');
+      writeFile(path.join(outside, 'calls.ts'), 'Avo.eventTwo();\n');
+      fs.rmSync('lib', { recursive: true, force: true });
+      fs.symlinkSync(outside, 'lib');
+      const readFileSpy = jest.spyOn(fs, 'readFile');
+
+      await status(undefined, statusJson([webSource]), { verbose: false });
+
+      expect(readPaths(readFileSpy)).not.toContain('lib/calls.ts');
+      expect(output()).toContain(
+        'sources\n' +
+          '└─ Web (Avo.ts)\n' +
+          '   ├─ eventOne\n' +
+          '   │  └─ used in src/a.ts: 1 time\n' +
+          '   └─ eventTwo\n' +
+          `      └─ ${logSymbols.error} no usage found\n`,
+      );
+      expect(exitSpy.mock.calls).toEqual([[1]]);
     });
 
     it('tolerates a listed file deleted from disk, or one it cannot read', async () => {

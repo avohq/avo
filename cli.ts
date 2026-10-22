@@ -2407,7 +2407,8 @@ type StatusSourceResults = {
 };
 
 // What became of a listed file that matched some source's effective glob. A
-// symlink, or a file that couldn't be checked or read, has none (null).
+// symlink, a file outside the project folder, or a file that couldn't be
+// checked or read, has none (null).
 type StatusFileOutcome =
   | ({ kind: 'oversized' } & OversizedFile)
   | {
@@ -2418,11 +2419,23 @@ type StatusFileOutcome =
       usageCounts: Map<number, number[]>;
     };
 
-// lstat first, so an oversized file is never read.
+function isInsideFolder(folder: string, filePath: string): boolean {
+  const relative = path.relative(folder, filePath);
+  return (
+    relative !== '' &&
+    relative !== '..' &&
+    !relative.startsWith(`..${path.sep}`) &&
+    !path.isAbsolute(relative)
+  );
+}
+
+// lstat first, so an oversized file is never read. `projectFolder` is a real
+// path.
 function analyseFile(
   filePath: string,
   sourceIndexes: number[],
   analyses: SourceAnalysis[],
+  projectFolder: string,
   verbose: boolean,
 ): Promise<StatusFileOutcome | null> {
   return pify(fs.lstat)(filePath)
@@ -2430,29 +2443,37 @@ function analyseFile(
       if (stats.isSymbolicLink()) {
         return null;
       }
-      if (stats.size > SIZE_CAP_BYTES) {
-        return { kind: 'oversized', filePath, size: stats.size };
-      }
-      return pify(fs.readFile)(filePath, 'utf8')
-        .then((data: string) => ({
-          kind: 'analysed',
-          filePath,
-          // The contents are dropped as soon as they are matched.
-          usageCounts: new Map(
-            sourceIndexes.map((sourceIndex) => [
-              sourceIndex,
-              analyses[sourceIndex].eventPatterns.map(
-                (re) => findMatches(data, re).length,
-              ),
-            ]),
-          ),
-        }))
-        .catch(() => {
-          if (verbose) {
-            report.warn(`Failed to parse file: ${filePath}`);
-          }
+      // git still lists a tracked path once a folder above it is replaced by
+      // a symlink, which lstat doesn't see. Like a symlink, a file whose real
+      // path is outside the project folder is skipped.
+      return pify(fs.realpath.native)(filePath).then((realPath: string) => {
+        if (!isInsideFolder(projectFolder, realPath)) {
           return null;
-        });
+        }
+        if (stats.size > SIZE_CAP_BYTES) {
+          return { kind: 'oversized', filePath, size: stats.size };
+        }
+        return pify(fs.readFile)(filePath, 'utf8')
+          .then((data: string) => ({
+            kind: 'analysed',
+            filePath,
+            // The contents are dropped as soon as they are matched.
+            usageCounts: new Map(
+              sourceIndexes.map((sourceIndex) => [
+                sourceIndex,
+                analyses[sourceIndex].eventPatterns.map(
+                  (re) => findMatches(data, re).length,
+                ),
+              ]),
+            ),
+          }))
+          .catch(() => {
+            if (verbose) {
+              report.warn(`Failed to parse file: ${filePath}`);
+            }
+            return null;
+          });
+      });
     })
     .catch(() => {
       if (verbose) {
@@ -2469,8 +2490,8 @@ export function status(source: string, json, argv: any): Promise<void> {
 
   sources = sources.filter(({ analysis }) => analysis !== false);
 
-  return listFiles()
-    .then((listing) =>
+  return Promise.all([listFiles(), pify(fs.realpath.native)('.')])
+    .then(([listing, projectFolder]: [Listing, string]) =>
       Promise.all(
         sources.map((source) =>
           pify(fs.readFile)(source.path, 'utf8').then((data: string) =>
@@ -2504,7 +2525,13 @@ export function status(source: string, json, argv: any): Promise<void> {
           matchedFiles,
           STATUS_READ_CONCURRENCY,
           ({ filePath, sourceIndexes }) =>
-            analyseFile(filePath, sourceIndexes, analyses, argv.verbose),
+            analyseFile(
+              filePath,
+              sourceIndexes,
+              analyses,
+              projectFolder,
+              argv.verbose,
+            ),
         ).then((outcomes) => ({
           listing,
           analyses,
