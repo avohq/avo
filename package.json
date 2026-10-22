@@ -29,7 +29,8 @@
   "files": [
     "cli.js",
     "reporter.js",
-    "Avo.js"
+    "Avo.js",
+    "listFiles.js"
   ],
   "dependencies": {
     "chalk": "^5.0.1",

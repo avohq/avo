@@ -1,5 +1,9 @@
 ## Unreleased
 
+`avo status` lists files with git, so it ignores exactly what git ignores: rules in parent folders, `.git/info/exclude` and the global `core.excludesFile` now apply, `build/`-style rules match at any depth, and submodules are listed by the same rules. Outside a git repo, without git, or when the project folder is itself ignored, it falls back to the old walker and says why. Fixes running out of memory in large React Native repos (#610)
+`avo status` reads only the files an effective glob matches, a few at a time, and skips files over a 10 MiB size cap. It warns once, with a count, about oversized files and about tracked files that match an ignore rule; `--verbose` lists them. Warnings never change the exit code, but an event whose only usage is in an oversized file is reported as missing
+`.github/` and `.gitlab-ci.yml` are no longer dropped from `avo status` when listing with git
+
 ## 3.7.0 (2026-10-16)
 
 Group the library interface settings in `avo.json` under a `libraryInterface` object (`fileFilter`, `sharedModule`, and per source `publicItems`). The flat `libraryInterfaceFileFilter` and `libraryInterfaceSharedModule` keys still work, but one level can't set both forms

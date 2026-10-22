@@ -23,5 +23,7 @@ jobs:
         run: yarn lint
       - name: Check formatting
         run: yarn check-format
+      - name: Run tests
+        run: yarn test
       - name: Check avo status
         run: node cli.js status
