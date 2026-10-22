@@ -87,48 +87,39 @@ export type RepoEntries = {
   trackedButIgnored: string[];
 };
 
-// HAND-CODE(hc-bdf0) — your turn. Delete this line when you're done.
-//
-// splitRepoEntries: sort one repo's `git ls-files` output into what to list.
-//
-// Context: listRepo() runs three `git ls-files -z` calls in one repo (the
-// project folder's, a submodule, or a nested repo) and hands their NUL-split
-// entries here. listRepo then lists every nested repo as a repo of its own,
-// with the same rules, and prefixes its paths. Fixes three #613 findings:
-// gitlinks without a .gitmodules entry, ignored submodules, and nested repos
-// that aren't submodules.
-//
-// Input (all paths relative to the repo):
-//   staged: `--stage` entries, "<mode> <object> <stage>\t<path>". Mode 160000
-//     is a gitlink (a submodule). A path in a merge conflict comes once per
-//     stage. Only the first tab separates the path: a path may hold a tab.
-//   untracked: `--others --exclude-standard` paths. A nested repo that isn't
-//     a submodule comes as its folder with a trailing slash, `tools/lib/`.
-//   ignored: `--cached --ignored --exclude-standard` paths: tracked files and
-//     gitlinks that match an ignore rule. May repeat a conflicted path.
-// Output, each without duplicates, in any order:
-//   files: tracked and untracked files, minus the ignored ones.
-//   nestedRepos: gitlink paths and nested repo folders (no trailing slash),
-//     minus ignored gitlinks, which must not be listed at all.
-//   trackedButIgnored: the ignored paths.
-//
-// Example:
-//   staged  ["100644 a1 0\tsrc/a.ts", "160000 b2 0\tlibs/core",
-//            "100644 c3 0\tdist/out.js", "160000 d4 0\tvendor/sub"]
-//   untracked ["src/new.ts", "tools/lib/"]
-//   ignored ["dist/out.js", "vendor/sub"]
-//   → files ["src/a.ts", "src/new.ts"], nestedRepos ["libs/core", "tools/lib"],
-//     trackedButIgnored ["dist/out.js", "vendor/sub"]
-//
-// Constraints: pure, no git or fs; never throws on well-formed entries.
-// Tests: listing.test.ts › splitRepoEntries · run: yarn test listing.test.ts -t splitRepoEntries
-// Estimate: ~15 min · easy-medium
+// Sorts one repo's `ls-files -z` entries into its files and the nested repos
+// to list on their own. `staged` entries are "<mode> <object> <stage>\t<path>"
+// (mode 160000 is a gitlink; a path in a merge conflict comes once per stage),
+// a nested repo that isn't a submodule comes in `untracked` as `dir/`, and
+// `ignored` holds the tracked paths that match an ignore rule. An ignored
+// gitlink isn't listed at all, as git shows none of its files.
 export function splitRepoEntries(
   staged: string[],
   untracked: string[],
   ignored: string[],
 ): RepoEntries {
-  throw new Error('not implemented');
+  const ignoredPaths = new Set(ignored);
+  const files = new Set<string>();
+  const nestedRepos = new Set<string>();
+  staged.forEach((entry) => {
+    const entryPath = entry.slice(entry.indexOf('\t') + 1);
+    if (ignoredPaths.has(entryPath)) {
+      return;
+    }
+    (entry.startsWith('160000 ') ? nestedRepos : files).add(entryPath);
+  });
+  untracked.forEach((filePath) => {
+    if (filePath.endsWith('/')) {
+      nestedRepos.add(filePath.slice(0, -1));
+    } else {
+      files.add(filePath);
+    }
+  });
+  return {
+    files: [...files],
+    nestedRepos: [...nestedRepos],
+    trackedButIgnored: [...ignoredPaths],
+  };
 }
 
 type RepoListing = {
