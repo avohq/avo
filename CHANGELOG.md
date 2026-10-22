@@ -1,5 +1,8 @@
 ## Unreleased
 
+Upgrade the Inspector SDK to node-avo-inspector 2.0.0-beta.2
+Send the CLI's own Inspector event before exiting with an error (not logged in, events missing in `avo status`, or an unexpected error), where it used to be lost
+
 ## 3.7.0 (2026-10-16)
 
 Group the library interface settings in `avo.json` under a `libraryInterface` object (`fileFilter`, `sharedModule`, and per source `publicItems`). The flat `libraryInterfaceFileFilter` and `libraryInterfaceSharedModule` keys still work, but one level can't set both forms
