@@ -2275,7 +2275,7 @@ describe('status', () => {
           '   ├─ eventOne\n' +
           '   │  └─ used in src/a.ts: 1 time\n' +
           '   └─ eventTwo\n' +
-          '      └─ ✖ no usage found\n',
+          `      └─ ${logSymbols.error} no usage found\n`,
         'info 1 of 2 events seen in code',
         'error 1 missing event',
         'missingEvents\n└─ Web (Avo.ts)\n   └─ eventTwo: no usage found\n',
@@ -2461,7 +2461,6 @@ describe('status', () => {
       writeFile('src/a.ts', 'Avo.eventOne();\n');
       writeFile('src/deleted.ts', 'Avo.eventOne();\n');
       writeFile('src/unreadable.ts', 'Avo.eventOne();\n');
-      fs.chmodSync('src/unreadable.ts', 0o000);
       // Deleted after listing, as a file missing from a sparse checkout or
       // removed mid-run would be.
       const realLstat = fs.lstat;
@@ -2473,6 +2472,24 @@ describe('status', () => {
           fs.unlinkSync(filePath);
         }
         realLstat(filePath, callback);
+      }) as any);
+      // Unreadable through the spy rather than chmod 000, which root can
+      // still read.
+      const realReadFile = fs.readFile;
+      jest.spyOn(fs, 'readFile').mockImplementation(((
+        filePath: string,
+        encoding: string,
+        callback: (error: unknown, data?: unknown) => void,
+      ) => {
+        if (filePath === 'src/unreadable.ts') {
+          callback(
+            Object.assign(new Error('EACCES: permission denied'), {
+              code: 'EACCES',
+            }),
+          );
+          return;
+        }
+        realReadFile(filePath, encoding as any, callback);
       }) as any);
 
       await status(undefined, statusJson([webSource]), { verbose: true });
