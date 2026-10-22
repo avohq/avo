@@ -1,0 +1,41 @@
+# A stand-in for the avohq/avo#610 reporter's .gitignore, not a copy: a React
+# Native .gitignore with the rules that matter for that repo. Under the
+# minimatch 5.1.9 that a fresh `npm i -g avo@3.7.0` resolves, ignore-walk lets
+# the `!**/.yarn/...` negation lines reopen node_modules, Pods and build.
+
+# Xcode
+**/build/
+*.pbxuser
+!default.pbxuser
+xcuserdata
+DerivedData
+**/.xcode.env.local
+
+# Android
+android/app/release/
+.gradle
+local.properties
+*.keystore
+!debug.keystore
+android/app/.cxx
+
+# node.js
+node_modules/
+npm-debug.log
+yarn-error.log
+
+# CocoaPods
+**/Pods
+/vendor/bundle/
+
+# Detox
+tests/e2e-tests/output
+tests/e2e-tests/artifacts
+
+# Yarn
+**/.yarn/*
+!**/.yarn/patches
+!**/.yarn/plugins
+!**/.yarn/releases
+!**/.yarn/sdks
+!**/.yarn/versions

@@ -1,5 +1,9 @@
 ## Unreleased
 
+Fix `avo status` running out of memory on large repositories. It now lists files with git, so everything your `.gitignore` ignores (`node_modules`, `Pods`, build output) is never considered, and it falls back to the previous folder walk, with a warning, when git can't list the folder
+Stop `avo status` reading files over the 10 MiB size cap, and warn with a count of these oversized files. Run with `--verbose` to list them. Use `analysis.glob` in `avo.json` to stop analysing a file that keeps tripping the cap
+Warn when `avo status` skips files that git tracks but your ignore rules match. Run with `--verbose` to list them
+
 ## 3.7.0 (2026-10-16)
 
 Group the library interface settings in `avo.json` under a `libraryInterface` object (`fileFilter`, `sharedModule`, and per source `publicItems`). The flat `libraryInterfaceFileFilter` and `libraryInterfaceSharedModule` keys still work, but one level can't set both forms

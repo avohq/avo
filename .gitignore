@@ -3,5 +3,6 @@ yarn-error.log
 cli.js
 Avo.js
 reporter.js
+listing.js
 package-lock.json
 .DS_Store

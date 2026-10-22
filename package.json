@@ -19,9 +19,9 @@
   "scripts": {
     "postinstall": "node cli.js track-install",
     "prepublishOnly": "npm run build",
-    "lint": "eslint cli.ts",
-    "format": "prettier --write cli.ts",
-    "check-format": "prettier --check cli.ts",
+    "lint": "eslint cli.ts listing.ts scripts/large-repo-check.js",
+    "format": "prettier --write cli.ts listing.ts scripts/large-repo-check.js",
+    "check-format": "prettier --check cli.ts listing.ts scripts/large-repo-check.js",
     "build": "tsc",
     "dev": "tsc && AVO_INSPECTOR_ENV=dev node cli.js",
     "test": "node --experimental-vm-modules node_modules/jest/bin/jest.js"
@@ -29,7 +29,8 @@
   "files": [
     "cli.js",
     "reporter.js",
-    "Avo.js"
+    "Avo.js",
+    "listing.js"
   ],
   "dependencies": {
     "chalk": "^5.0.1",
