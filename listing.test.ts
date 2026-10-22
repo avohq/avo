@@ -444,6 +444,26 @@ describe('listFiles', () => {
         fallbackReason: 'the project folder is ignored by git',
       });
     });
+
+    // check-ignore skips paths in the index, so a force-added file mustn't
+    // make the ignored folder look tracked, which would list nothing untracked.
+    it('lists with the walker when the project folder is ignored by git but has force-added files', async () => {
+      const repo = initRepo('repo');
+      write(path.join(repo, '.gitignore'), 'app/\n');
+      touchWalkerFixture(path.join(repo, 'app'));
+      git(repo, 'add', '-f', 'app/src/a.ts');
+      commitAll(repo);
+      touch(repo, 'app/src/b.ts');
+      process.chdir(path.join(repo, 'app'));
+
+      const listing = await listFiles();
+
+      expect(listing).toEqual({
+        listedFiles: ['src/a.ts', 'src/b.ts'],
+        trackedButIgnored: [],
+        fallbackReason: 'the project folder is ignored by git',
+      });
+    });
   });
 });
 

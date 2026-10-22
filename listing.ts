@@ -72,7 +72,9 @@ function gitLines(
 }
 
 function isProjectFolderIgnored(): Promise<boolean> {
-  return runGit(['check-ignore', '-q', '.']).then((result) => {
+  // --no-index: check-ignore otherwise skips paths in the index, so a file
+  // force-added inside an ignored project folder would hide the ignore rule.
+  return runGit(['check-ignore', '--no-index', '-q', '.']).then((result) => {
     // check-ignore exits 0 when the path is ignored and 1 when it isn't.
     if (result.code === 0 || result.code === 1) {
       return result.code === 0;
