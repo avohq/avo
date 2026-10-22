@@ -73,6 +73,29 @@ describe('listFiles', () => {
       expect((await listFiles()).files).toEqual(['.gitignore', 'src/a.ts']);
     });
 
+    it('ignores the repo location git exports to hooks', async () => {
+      const repo = initRepo(path.join(sandbox.root(), 'repo'));
+      writeFiles(repo, { 'app/src/a.ts': '', 'other.ts': '' });
+      commitAll(repo);
+      process.chdir(path.join(repo, 'app'));
+
+      // As in a pre-commit hook run from the repo root that runs
+      // `cd app && avo status`
+      process.env.GIT_DIR = '.git';
+      process.env.GIT_INDEX_FILE = path.join(repo, '.git/index');
+      process.env.GIT_PREFIX = '';
+      let listing;
+      try {
+        listing = await listFiles();
+      } finally {
+        delete process.env.GIT_DIR;
+        delete process.env.GIT_INDEX_FILE;
+        delete process.env.GIT_PREFIX;
+      }
+
+      expect(listing).toEqual({ files: ['src/a.ts'], trackedIgnored: [] });
+    });
+
     it('lists .github/ and .gitlab-ci.yml but nothing under .git/', async () => {
       const repo = initRepo(path.join(sandbox.root(), 'repo'));
       writeFiles(repo, {

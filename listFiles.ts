@@ -24,11 +24,31 @@ type GitResult = { code: number; stdout: string; stderr: string };
 
 // Output is collected from the stream rather than buffered by execFile, whose
 // default 1 MB maxBuffer is far smaller than a large repo's listing.
-// The env is passed explicitly so that git sees this process's current env;
-// under jest, process.env is a sandboxed copy the child would not inherit.
+// Set by git for hooks. Left in place, they would point git at another repo or
+// index than the one the project folder is in, for example when a pre-commit
+// hook runs `cd app && avo status`.
+const GIT_LOCATION_ENV_KEYS = [
+  'GIT_DIR',
+  'GIT_WORK_TREE',
+  'GIT_INDEX_FILE',
+  'GIT_OBJECT_DIRECTORY',
+  'GIT_ALTERNATE_OBJECT_DIRECTORIES',
+  'GIT_COMMON_DIR',
+  'GIT_NAMESPACE',
+  'GIT_PREFIX',
+];
+
+// A copy of this process's current env, which is passed explicitly because
+// under jest process.env is a sandboxed copy the child would not inherit
+function gitEnv(): NodeJS.ProcessEnv {
+  const env = { ...process.env };
+  GIT_LOCATION_ENV_KEYS.forEach((key) => delete env[key]);
+  return env;
+}
+
 function runGit(args: string[], cwd: string): Promise<GitResult> {
   return new Promise<GitResult>((resolve, reject) => {
-    const child = spawn('git', args, { cwd, env: process.env });
+    const child = spawn('git', args, { cwd, env: gitEnv() });
     const stdout: Buffer[] = [];
     const stderr: Buffer[] = [];
     child.stdout.on('data', (chunk: Buffer) => stdout.push(chunk));

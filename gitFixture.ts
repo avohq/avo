@@ -9,6 +9,17 @@ import os from 'os';
 import path from 'path';
 import { beforeEach, afterEach } from '@jest/globals';
 
+// Set by git when tests run from a hook; left in place, fixture commands would
+// act on the developer's own repo or index
+const GIT_LOCATION_ENV_KEYS = [
+  'GIT_DIR',
+  'GIT_WORK_TREE',
+  'GIT_INDEX_FILE',
+  'GIT_OBJECT_DIRECTORY',
+  'GIT_ALTERNATE_OBJECT_DIRECTORIES',
+  'GIT_COMMON_DIR',
+];
+
 const GIT_ENV_KEYS = [
   'HOME',
   'GIT_CONFIG_NOSYSTEM',
@@ -18,6 +29,7 @@ const GIT_ENV_KEYS = [
   'GIT_COMMITTER_NAME',
   'GIT_COMMITTER_EMAIL',
   'GIT_CONFIG_COUNT',
+  ...GIT_LOCATION_ENV_KEYS,
 ];
 
 export type GitSandbox = {
@@ -62,6 +74,7 @@ export function useGitSandbox(): GitSandbox {
       // drops config injected through GIT_CONFIG_KEY_<n> variables
       GIT_CONFIG_COUNT: '0',
     });
+    GIT_LOCATION_ENV_KEYS.forEach((key) => delete process.env[key]);
   });
 
   afterEach(() => {
