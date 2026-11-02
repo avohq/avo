@@ -563,7 +563,9 @@ describe('avo.json merge conflict resolution', () => {
         { libraryInterfaceFileFilter: 'interface-only' },
       );
 
-      expect(message).toContain("kept libraryInterfaceFileFilter 'events-only'");
+      expect(message).toContain(
+        "kept libraryInterfaceFileFilter 'events-only'",
+      );
       expect(message).toContain("incoming had 'interface-only'");
     });
 
@@ -581,7 +583,9 @@ describe('avo.json merge conflict resolution', () => {
         { libraryInterfaceFileFilter: 'events-only' },
         {},
       );
-      expect(missingIncoming).toContain("kept libraryInterfaceFileFilter 'events-only'");
+      expect(missingIncoming).toContain(
+        "kept libraryInterfaceFileFilter 'events-only'",
+      );
       expect(missingIncoming).toContain("incoming had 'all'");
     });
   });
@@ -703,16 +707,18 @@ describe('libraryInterfaceFileFilter', () => {
     // The value is a handle consumed verbatim server-side — a Kotlin package or a
     // TS module specifier. The CLI has no language field and must derive nothing.
     it('returns the value verbatim, whatever shape it has', () => {
-      ['../../shell/AvoLibrary', 'com.acme.analytics', '@acme/analytics'].forEach(
-        (value) => {
-          expect(
-            resolveLibraryInterfaceSharedModule({
-              source: { libraryInterfaceSharedModule: value },
-              json: {},
-            }),
-          ).toBe(value);
-        },
-      );
+      [
+        '../../shell/AvoLibrary',
+        'com.acme.analytics',
+        '@acme/analytics',
+      ].forEach((value) => {
+        expect(
+          resolveLibraryInterfaceSharedModule({
+            source: { libraryInterfaceSharedModule: value },
+            json: {},
+          }),
+        ).toBe(value);
+      });
     });
   });
 
@@ -982,6 +988,105 @@ describe('libraryInterfaceFileFilter', () => {
     });
   });
 
+  describe('libraryInterface.avoEventSupertypes', () => {
+    it('forwards a per-source list on pull, as the flat wire key', () => {
+      const json: any = baseJson();
+      json.sources[1].libraryInterface = {
+        avoEventSupertypes: ['com.acme.Bridge', 'Local'],
+      };
+
+      const body = buildPullRequestBody(json, json.sources);
+
+      expect(body.sources[1].libraryInterfaceAvoEventSupertypes).toEqual([
+        'com.acme.Bridge',
+        'Local',
+      ]);
+      expect('libraryInterfaceAvoEventSupertypes' in body.sources[0]).toBe(
+        false,
+      );
+    });
+
+    it('omits the key when unset or empty', () => {
+      const json: any = baseJson();
+      json.sources[1].libraryInterface = { avoEventSupertypes: [] };
+
+      const body = buildPullRequestBody(json, json.sources);
+
+      expect(
+        body.sources.map((s: any) => 'libraryInterfaceAvoEventSupertypes' in s),
+      ).toEqual([false, false]);
+    });
+
+    it('accepts valid entries in validateAvoJson', async () => {
+      const json: any = baseJson();
+      json.sources[1].libraryInterface = {
+        avoEventSupertypes: ['NYTET2Types.EventGateInfoTransformable'],
+      };
+
+      const validated: any = await validateAvoJson(json);
+      expect(validated.sources[1].libraryInterface.avoEventSupertypes).toEqual([
+        'NYTET2Types.EventGateInfoTransformable',
+      ]);
+    });
+
+    it.each([
+      ['a non-array', 'com.acme.Bridge'],
+      ['a non-string entry', ['com.acme.Bridge', 42]],
+      ['an empty entry', ['']],
+      ['an entry with whitespace', [' com.acme.Bridge']],
+      ['an entry with a generic', ['Foo<Bar>']],
+      ['an entry with a trailing dot', ['com.acme.']],
+      ['an entry with an empty segment', ['com..Bridge']],
+    ])('rejects %s, naming the setting and source', (_label, value) => {
+      const json: any = baseJson();
+      json.sources[1].libraryInterface = { avoEventSupertypes: value };
+
+      expect(() => validateAvoJson(json)).toThrow(
+        /Invalid libraryInterface\.avoEventSupertypes on source 'iOS'/,
+      );
+    });
+
+    it('rejects two entries with the same type name', () => {
+      const json: any = baseJson();
+      json.sources[1].libraryInterface = {
+        avoEventSupertypes: ['a.Bridge', 'b.Bridge'],
+      };
+
+      expect(() => validateAvoJson(json)).toThrow(
+        /entries 0 and 1 both name the type 'Bridge'/,
+      );
+    });
+
+    it('rejects more than 20 entries, giving the count', () => {
+      const json: any = baseJson();
+      json.sources[1].libraryInterface = {
+        avoEventSupertypes: Array.from({ length: 21 }, (_, i) => `p.T${i}`),
+      };
+
+      expect(() => validateAvoJson(json)).toThrow(
+        /lists 21 entries; at most 20 are allowed/,
+      );
+    });
+
+    it('rejects the setting at the top level of avo.json', () => {
+      const json: any = baseJson();
+      json.libraryInterface = { avoEventSupertypes: ['com.acme.Bridge'] };
+
+      expect(() => validateAvoJson(json)).toThrow(
+        /libraryInterface\.avoEventSupertypes in avo\.json is not supported here/,
+      );
+    });
+
+    it('rejects a flat libraryInterfaceAvoEventSupertypes key', () => {
+      const json: any = baseJson();
+      json.sources[1].libraryInterfaceAvoEventSupertypes = ['com.acme.Bridge'];
+
+      expect(() => validateAvoJson(json)).toThrow(
+        /libraryInterfaceAvoEventSupertypes.*set libraryInterface\.avoEventSupertypes instead/,
+      );
+    });
+  });
+
   describe('nested libraryInterface settings', () => {
     it('resolves nested top-level settings like the flat keys, sending flat wire keys', () => {
       const json: any = baseJson();
@@ -1093,7 +1198,7 @@ describe('libraryInterfaceFileFilter', () => {
       json.sources[1].libraryInterface = value;
 
       expect(() => validateAvoJson(json)).toThrow(
-        "Invalid libraryInterface on source 'iOS' in avo.json — must be an object with fileFilter, sharedModule or publicItems",
+        "Invalid libraryInterface on source 'iOS' in avo.json — must be an object with fileFilter, sharedModule, publicItems or avoEventSupertypes",
       );
     });
 
@@ -1296,7 +1401,7 @@ describe('libraryInterfaceFileFilter', () => {
     // hid rejections from the pull command's own .catch analytics path (they
     // still landed on the process-wide unhandledRejection handler, but with a
     // bare process.exit(1) that loses per-command context).
-    it("awaits an async runCodegen before resolving", async () => {
+    it('awaits an async runCodegen before resolving', async () => {
       const json: any = baseJson();
       let resolved = false;
       let releaseCodegen: () => void = () => {};
@@ -1431,7 +1536,9 @@ describe('avo init and libraryInterfaceFileFilter', () => {
       expect('libraryInterfaceFileFilter' in json).toBe(false);
       expect('libraryInterfaceSharedModule' in json).toBe(false);
       expect('libraryInterface' in json).toBe(false);
-      const infoLines = reportInfo.mock.calls.map((c) => String(c[0])).join('\n');
+      const infoLines = reportInfo.mock.calls
+        .map((c) => String(c[0]))
+        .join('\n');
       expect(infoLines).toContain('libraryInterface.fileFilter');
       expect(infoLines).toContain('libraryInterface.sharedModule');
     });
@@ -1521,7 +1628,9 @@ describe('stale files from a previous filter', () => {
     // interface — wording that names the interface would send a user to delete
     // the wrong file.
     it('uses the same wording for an app-side file', () => {
-      const warning = buildStaleSuppressedFileWarning('src/AvoEvents/clicked.ts');
+      const warning = buildStaleSuppressedFileWarning(
+        'src/AvoEvents/clicked.ts',
+      );
 
       expect(warning).toContain('src/AvoEvents/clicked.ts');
       expect(warning).not.toContain('shared interface');
@@ -1691,7 +1800,12 @@ describe('stale files from a previous filter', () => {
           target({ suppressedPaths: ['src/AvoLibrary.ts'] }),
           target({
             id: 'source-2',
-            code: [{ path: 'src/AvoNodeEvents/eventClicked.ts', content: '// event' }],
+            code: [
+              {
+                path: 'src/AvoNodeEvents/eventClicked.ts',
+                content: '// event',
+              },
+            ],
             suppressedPaths: ['src/AvoLibrary.ts'],
           }),
         ],
@@ -1738,7 +1852,10 @@ describe('buildSourcePaths', () => {
   it('puts the interface file in the same folder as the events file', () => {
     expect(
       buildSourcePaths(
-        { folder: 'library/src/main/kotlin/sh/avo/library', filename: 'Avo.kt' },
+        {
+          folder: 'library/src/main/kotlin/sh/avo/library',
+          filename: 'Avo.kt',
+        },
         { interfaceFilename: 'AvoInterface.kt' },
         cwd,
       ),
