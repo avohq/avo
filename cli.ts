@@ -719,7 +719,7 @@ export function parseLibraryInterfaceAvoEventSupertypes(
   // Two entries with one type name would make the generated imports or the
   // inheritance list conflict.
   const seen = new Map<string, number>();
-  for (const [index, entry] of (value as string[]).entries()) {
+  (value as string[]).forEach((entry, index) => {
     const typeName = entry.slice(entry.lastIndexOf('.') + 1);
     const first = seen.get(typeName);
     if (first !== undefined) {
@@ -728,7 +728,7 @@ export function parseLibraryInterfaceAvoEventSupertypes(
       );
     }
     seen.set(typeName, index);
-  }
+  });
   return value as string[];
 }
 
