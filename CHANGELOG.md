@@ -1,4 +1,4 @@
-## 3.8.0-beta.0 (2026-11-05)
+## 3.8.0 (2026-11-05)
 
 Add per-source `libraryInterface.avoEventSupertypes` to make the generated `AvoEvent` extend your own interfaces (Kotlin) or protocols (Swift) in the library interface file, so `AvoLibraryInterface` no longer needs hand edits after `avo pull`. Entries are `package.Type` (Kotlin) or `Module.Type` (Swift); a bare `Type` needs no import
 Upgrade everyone who runs `avo pull` for a workspace, CI included, to this release before adding `avoEventSupertypes` to `avo.json`. 3.7.0 rejects the key (`Unknown key 'avoEventSupertypes' in libraryInterface`)
