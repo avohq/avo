@@ -1,5 +1,7 @@
 ## Unreleased
 
+Add per-source `libraryInterface.avoEventSupertypes` to make the generated `AvoEvent` extend your own interfaces (Kotlin) or protocols (Swift) in the library interface file, so `AvoLibraryInterface` no longer needs hand edits after `avo pull`. Entries are `package.Type` (Kotlin) or `Module.Type` (Swift); a bare `Type` needs no import. Needs a server that supports it; older servers ignore the setting
+Upgrade everyone who runs `avo pull` for a workspace, CI included, to this release before adding `avoEventSupertypes` to `avo.json`. 3.7.0 rejects the key (`Unknown key 'avoEventSupertypes' in libraryInterface`)
 Upgrade the Inspector SDK to node-avo-inspector 2.0.0
 Send the CLI's own Inspector event before exiting with an error (not logged in, events missing in `avo status`, or an unexpected error), where it used to be lost
 

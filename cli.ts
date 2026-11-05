@@ -557,6 +557,11 @@ type LibraryInterfaceSettings = {
   // 'initAvo') that stay public when the file is otherwise internal. Forwarded
   // raw; codegen resolves the names and warns about unknown ones.
   publicItems?: string[];
+  // Supertypes of the generated AvoEvent (Kotlin and Swift library interface), as
+  // 'Location.Type' strings: everything before the last '.' is the Kotlin package
+  // or Swift module, the last segment is the type; a bare name needs no import.
+  // Forwarded raw; codegen resolves them and warns when the setting has no effect.
+  avoEventSupertypes?: string[];
 };
 
 type Source = {
@@ -589,8 +594,12 @@ type AvoJson = {
   forceFeatures?: string;
   libraryInterfaceFileFilter?: LibraryInterfaceFileFilter;
   libraryInterfaceSharedModule?: string;
-  // publicItems names declarations in one source's app file, so it is per source only.
-  libraryInterface?: Omit<LibraryInterfaceSettings, 'publicItems'>;
+  // publicItems and avoEventSupertypes shape one source's generated files, so they
+  // are per source only.
+  libraryInterface?: Omit<
+    LibraryInterfaceSettings,
+    'publicItems' | 'avoEventSupertypes'
+  >;
   sources?: Source[];
 };
 
@@ -615,6 +624,7 @@ function libraryInterfaceSettingsOf(
       holder.libraryInterface?.sharedModule ??
       holder.libraryInterfaceSharedModule,
     publicItems: holder.libraryInterface?.publicItems,
+    avoEventSupertypes: holder.libraryInterface?.avoEventSupertypes,
   };
 }
 
@@ -668,6 +678,58 @@ export function parseLibraryInterfacePublicItems(
     );
   }
   return value;
+}
+
+// Matches the server's cap on the decoded list.
+const LIBRARY_INTERFACE_AVO_EVENT_SUPERTYPES_MAX = 20;
+
+// A dotted identifier path: `Type`, or `location.Type` where the location is a
+// Kotlin package or a Swift module. Language-neutral; codegen applies the
+// Swift-only single-segment module rule and skips a bad entry with a warning.
+const AVO_EVENT_SUPERTYPE_PATTERN =
+  /^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)*$/;
+
+export function parseLibraryInterfaceAvoEventSupertypes(
+  value: unknown,
+  context = '',
+): string[] {
+  const name = `libraryInterface.avoEventSupertypes${context}`;
+  if (!Array.isArray(value)) {
+    throw new AvoError(
+      `Invalid ${name} — must be an array of dotted identifiers such as 'com.acme.Bridge'`,
+    );
+  }
+  if (value.length > LIBRARY_INTERFACE_AVO_EVENT_SUPERTYPES_MAX) {
+    throw new AvoError(
+      `Invalid ${name} — lists ${value.length} entries; at most ${LIBRARY_INTERFACE_AVO_EVENT_SUPERTYPES_MAX} are allowed`,
+    );
+  }
+  const badIndex = value.findIndex(
+    (item) =>
+      typeof item !== 'string' || !AVO_EVENT_SUPERTYPE_PATTERN.test(item),
+  );
+  if (badIndex !== -1) {
+    const bad = value[badIndex];
+    throw new AvoError(
+      `Invalid ${name} — each entry must be a dotted identifier such as 'com.acme.Bridge' or 'Bridge'; entry ${badIndex} is ${
+        typeof bad === 'string' ? `'${bad}'` : JSON.stringify(bad)
+      }`,
+    );
+  }
+  // Two entries with one type name would make the generated imports or the
+  // inheritance list conflict.
+  const seen = new Map<string, number>();
+  (value as string[]).forEach((entry, index) => {
+    const typeName = entry.slice(entry.lastIndexOf('.') + 1);
+    const first = seen.get(typeName);
+    if (first !== undefined) {
+      throw new AvoError(
+        `Invalid ${name} — entries ${first} and ${index} both name the type '${typeName}'`,
+      );
+    }
+    seen.set(typeName, index);
+  });
+  return value as string[];
 }
 
 export function resolveLibraryInterfaceFileFilter({
@@ -983,6 +1045,7 @@ const SOURCE_LIBRARY_INTERFACE_KEYS = [
   'fileFilter',
   'sharedModule',
   'publicItems',
+  'avoEventSupertypes',
 ];
 const TOP_LEVEL_LIBRARY_INTERFACE_KEYS = ['fileFilter', 'sharedModule'];
 const FLAT_LIBRARY_INTERFACE_KEYS = [
@@ -1023,6 +1086,14 @@ function validateNestedLibraryInterface(
       )}`,
     );
   }
+  if (
+    'avoEventSupertypes' in nested &&
+    !allowedKeys.includes('avoEventSupertypes')
+  ) {
+    throw new AvoError(
+      `libraryInterface.avoEventSupertypes${context} is not supported here — set it on a source, under sources[].libraryInterface`,
+    );
+  }
   const unknownKey = Object.keys(nested).find(
     (key) => !allowedKeys.includes(key),
   );
@@ -1041,10 +1112,8 @@ function validateNestedLibraryInterface(
       `Set either libraryInterface or ${flatKey}${context}, not both`,
     );
   }
-  const { fileFilter, sharedModule, publicItems } = nested as Record<
-    string,
-    unknown
-  >;
+  const { fileFilter, sharedModule, publicItems, avoEventSupertypes } =
+    nested as Record<string, unknown>;
   if (fileFilter !== undefined) {
     parseLibraryInterfaceFileFilter(
       fileFilter,
@@ -1055,6 +1124,9 @@ function validateNestedLibraryInterface(
   validateSharedModule(sharedModule, context, 'libraryInterface.sharedModule');
   if (publicItems !== undefined) {
     parseLibraryInterfacePublicItems(publicItems, context);
+  }
+  if (avoEventSupertypes !== undefined) {
+    parseLibraryInterfaceAvoEventSupertypes(avoEventSupertypes, context);
   }
 }
 
@@ -1068,6 +1140,11 @@ function validateLibraryInterfaceSettings(
   if ('libraryInterfacePublicItems' in holder) {
     throw new AvoError(
       `libraryInterfacePublicItems${context} is not supported — set libraryInterface.publicItems instead`,
+    );
+  }
+  if ('libraryInterfaceAvoEventSupertypes' in holder) {
+    throw new AvoError(
+      `libraryInterfaceAvoEventSupertypes${context} is not supported — set libraryInterface.avoEventSupertypes instead`,
     );
   }
   if (holder.libraryInterface !== undefined) {
@@ -1951,7 +2028,8 @@ export function buildPullRequestBody(
         source,
         json,
       });
-      const { publicItems } = libraryInterfaceSettingsOf(source);
+      const { publicItems, avoEventSupertypes } =
+        libraryInterfaceSettingsOf(source);
       return {
         id: source.id,
         path: source.path,
@@ -1967,6 +2045,10 @@ export function buildPullRequestBody(
         ...(publicItems === undefined
           ? {}
           : { libraryInterfacePublicItems: publicItems }),
+        // Omitted when unset or empty, so an older server never sees the key.
+        ...(avoEventSupertypes === undefined || avoEventSupertypes.length === 0
+          ? {}
+          : { libraryInterfaceAvoEventSupertypes: avoEventSupertypes }),
       };
     }),
     force: json.force ?? false,
