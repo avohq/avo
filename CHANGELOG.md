@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+Upgrade the Inspector SDK to node-avo-inspector 2.0.1, so the `Force Features` list property is no longer dropped from the CLI's own Inspector events when `AVO_INSPECTOR_ENV` is `dev` or `staging`
+
 ## 3.8.0 (2026-11-05)
 
 Add per-source `libraryInterface.avoEventSupertypes` to make the generated `AvoEvent` extend your own interfaces (Kotlin) or protocols (Swift) in the library interface file, so `AvoLibraryInterface` no longer needs hand edits after `avo pull`. Entries are `package.Type` (Kotlin) or `Module.Type` (Swift); a bare `Type` needs no import
